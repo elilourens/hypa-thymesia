@@ -1,0 +1,16 @@
+Vector DB with LLM interface to store and return personal info.
+
+ChromaDB for vector db. 
+Ollama + model for LLM. 
+
+Python for scripting + poetry. 
+
+Docker to contain everything? Need research done here.
+
+
+Actual Product: 
+
+Each user has an account: 
+Their own multimodal vector db.
+Can interact with a LLM chatbot to save and retrieve data. 
+Can also search through “pages” which can be for events or people. 
