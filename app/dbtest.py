@@ -6,20 +6,24 @@ def main():
     )
 
     db.add_texts(
-        ids=["doc1", "doc2"],
+        ids=["1", "2"],
         documents=[
-            "Here’s the first text.",
-            "And here’s the second."
+            "Their favourite food is apples.",
+            "They absolutely hate their job."
         ],
         metadatas=[
-            {"source": "notion"},
-            {"source": "google-docs"}
+            {"person": "dave"},
+            {"person": "joe"}
         ],
     )
 
     print("Chroma heartbeat:", db.client.heartbeat())
     print("Total items in collection:", db.count())
-    print("Query result:", db.query("return the second bit of text"))
+    #print("Query result:", db.query("jpmorgan"))
+    db.delete_record(
+        "1"
+    )
+    print("Total items in collection:", db.count())
 
 if __name__ == "__main__":
     main()

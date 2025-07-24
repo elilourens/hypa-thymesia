@@ -76,6 +76,14 @@ class ChromaDB:
             metadatas=metadatas,
         )
 
+    def delete_record(
+            self,
+            document_ids: list[str],
+    ):
+        self.collection.delete(
+            ids=document_ids
+        )
+
     def query(
         self,
         query: str,
@@ -91,3 +99,5 @@ class ChromaDB:
 
     def count(self) -> int:
         return self.collection.count()
+    
+
