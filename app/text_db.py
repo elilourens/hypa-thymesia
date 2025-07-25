@@ -24,11 +24,8 @@ class OllamaEmbeddingFunction:
     embed_query = __call__
 
 
-class ChromaDB:
-    """
-    Wraps a Chroma HTTP client + collection + Ollama embedder.
-    Both add_texts() and query() auto‑vectorize via Ollama.
-    """
+class text_ChromaDB:
+    
     def __init__(
         self,
         host: str = "localhost",
@@ -99,5 +96,16 @@ class ChromaDB:
 
     def count(self) -> int:
         return self.collection.count()
+    
+    def wipe(
+        self,
+    ): 
+        self.client.delete_collection(name=self.collection.name)
+
+        self.collection = self.client.get_or_create_collection(
+            name=self.collection.name,
+            metadata=self.collection.metadata,
+            embedding_function=self.embedder,
+        )
     
 

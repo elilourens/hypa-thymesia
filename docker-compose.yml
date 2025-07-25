@@ -1,9 +1,19 @@
 services:
-  chroma:
+  text_chroma:
     image: chromadb/chroma:latest
-    container_name: chroma
+    container_name: text_chroma
     ports:
       - "8000:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+
+  image_chroma:
+    image: chromadb/chroma:latest
+    container_name: image_chroma
+    ports:
+      - "8001:8000"
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE

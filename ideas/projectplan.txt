@@ -1,5 +1,3 @@
-Vector DB with LLM interface to store and return personal info.
-
 ChromaDB for vector db. 
 Ollama + model for LLM. 
 
@@ -10,7 +8,12 @@ Docker to contain everything? Need research done here.
 
 Actual Product: 
 
-Each user has an account: 
-Their own multimodal vector db.
-Can interact with a LLM chatbot to save and retrieve data. 
-Can also search through “pages” which can be for events or people. 
+multimodal notes / information retrieval app. 
+mass ingest data - focus on accepting all formats. 
+Audio, Video, Images, Text 
+
+Video poses a challenge -> first mover atvantage? 
+1. Hybrid approach - Create embeddings from subtitle data / maybe embed 1 frame every second. 
+2. Fully embed each videos frame and audio? (spenny)
+
+pdf, pptx, excel, markdown, docx, anything imaginable. 
