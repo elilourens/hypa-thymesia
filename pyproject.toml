@@ -14,7 +14,10 @@ dependencies = [
     "ollama (>=0.5.1,<0.6.0)",
     "pillow (>=11.3.0,<12.0.0)",
     "matplotlib (>=3.10.3,<4.0.0)",
-    "open-clip-torch (>=3.0.0,<4.0.0)"
+    "open-clip-torch (>=3.0.0,<4.0.0)",
+    "fastapi (>=0.116.1,<0.117.0)",
+    "supabase (>=2.17.0,<3.0.0)",
+    "python-dotenv (>=1.1.1,<2.0.0)"
 ]
 
 

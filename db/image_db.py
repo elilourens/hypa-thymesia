@@ -66,6 +66,19 @@ class image_chroma:
             total += len(batch)
 
         return total
+    
+    def add_image(self,uri: str, metadata: dict = None):
+        
+        new_id = str(self.collection.count() + 1)
+        self.collection.add(
+            uris=[uri],
+            ids= new_id,
+            metadatas=[{
+                "date_added": "26/07/2025",
+                "image_url": "https://"
+                }],
+        )
+        return new_id
 
     def query_by_text(self, text: str, n_results: int = 5, include=None):
         include = include or ["uris", "metadatas", "distances", "documents"]
@@ -77,3 +90,22 @@ class image_chroma:
 
     def count(self) -> int:
         return self.collection.count()
+    
+    def delete_record(
+            self,
+            document_ids: list[str],
+    ):
+        self.collection.delete(
+            ids=document_ids
+        )
+    
+    def wipe(
+        self,
+    ): 
+        self.client.delete_collection(name=self.collection.name)
+
+        self.collection = self.client.get_or_create_collection(
+            name=self.collection.name,
+            metadata=self.collection.metadata,
+            embedding_function=self.embedder,
+        )
