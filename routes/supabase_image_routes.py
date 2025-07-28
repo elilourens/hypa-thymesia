@@ -1,30 +1,18 @@
 import os
 from dotenv import load_dotenv
-from fastapi import APIRouter, UploadFile, File
-#from ..db import image_db
 from supabase import create_client, Client
 from uuid import uuid4
-from pathlib import Path
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 from io import BytesIO
 
-#example for testing
-BASE_DIR = Path(__file__).resolve().parent.parent 
-image_path = BASE_DIR / "db" / "images" / "cat.jpg"
+
 
 load_dotenv()
-router = APIRouter()
+
 
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(url,key)
-
-from uuid import uuid4
-from PIL import Image, UnidentifiedImageError
-from io import BytesIO
-import os
-
-
 
 #SupaBase Image bucket interactions: 
 
@@ -57,10 +45,3 @@ def wipe_images_from_bucket(bucket: str = "images") -> str:
     return result
 
 
-
-
-
-
-
-#@router.post("/image/add/")
-#async def add_image()

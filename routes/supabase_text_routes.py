@@ -2,7 +2,6 @@ import os
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from uuid import uuid4
-from pathlib import Path
 
 load_dotenv()
 url = os.getenv("SUPABASE_URL")
