@@ -18,8 +18,8 @@ def extract_docx_text_metadata(docx_path: str, user_id: str) -> Dict[str, List[D
 
         current_chunk.append(text)
 
-        # Optional: chunk on blank lines or max character count
-        if len(" ".join(current_chunk)) > 800:  # You can tune this threshold
+        
+        if len(" ".join(current_chunk)) > 800:  
             chunk_text = " ".join(current_chunk)
             text_chunks.append({
                 "chunk_text": chunk_text,
@@ -30,7 +30,6 @@ def extract_docx_text_metadata(docx_path: str, user_id: str) -> Dict[str, List[D
             })
             current_chunk = []
 
-    # Add any remaining chunk
     if current_chunk:
         chunk_text = " ".join(current_chunk)
         text_chunks.append({
