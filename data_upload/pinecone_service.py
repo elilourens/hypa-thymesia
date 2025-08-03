@@ -1,23 +1,23 @@
-import pinecone
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
+from pinecone import Pinecone
 from typing import List, Dict, Any
 
+# Load environment variables
 load_dotenv()
 
-# Initialize Pinecone
-pinecone.init(
-    api_key=os.getenv("PINECONE_API_KEY"),
+# Initialize Pinecone client using the new Pinecone class
+pc = Pinecone(
+    api_key=os.getenv("PINECONE_KEY"),
     environment=os.getenv("PINECONE_ENVIRONMENT")
 )
 
-
+# Connect to existing index
 index_name = os.getenv("PINECONE_INDEX_NAME")
-index = pinecone.Index(index_name)
+index = pc.Index(index_name)
 
-
+# Maximum batch size for upserts
 MAX_BATCH = "100"
-
 
 def upload_to_pinecone(
     file_type: str,
@@ -45,10 +45,8 @@ def upload_to_pinecone(
             }
             items.append((item_id, vec, metadata))
 
-        
-        batch_size = min(len(items), MAX_BATCH)
+        batch_size = min(len(items), int(MAX_BATCH))
 
-        
         for i in range(0, len(items), batch_size):
             batch = items[i : i + batch_size]
             index.upsert(vectors=batch)
@@ -56,5 +54,6 @@ def upload_to_pinecone(
         return True
 
     except Exception as e:
-        # Optionally log e here
+        # Log exception details for debugging
+        print(f"Pinecone upload error: {e}")
         return False
