@@ -32,9 +32,9 @@ def upload_to_pinecone(
     otherwise we split into chunks of MAX_BATCH.
     """
     try:
-        # Build the (id, vector, metadata) tuples
+        # Build the (id, vector, metadata) tuples (1-based index)
         items = []
-        for idx, vec in enumerate(vectors):
+        for idx, vec in enumerate(vectors, start=1):
             item_id = f"{user_id}:{record_id}:{idx}"
             metadata: Dict[str, Any] = {
                 "file_type":   file_type,
@@ -45,7 +45,8 @@ def upload_to_pinecone(
             }
             items.append((item_id, vec, metadata))
 
-        batch_size = min(len(items), int(MAX_BATCH))
+        batch_size = min(len(items), int(MAX_BATCH)) or 1
+
 
         for i in range(0, len(items), batch_size):
             batch = items[i : i + batch_size]

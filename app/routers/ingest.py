@@ -7,15 +7,16 @@ from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import APIRouter, File, UploadFile, HTTPException
 
-from data_upload.supabase_text_upload import upload_text_to_bucket
+from data_upload.supabase_text_services import upload_text_to_bucket
+from data_upload.supabase_image_services import upload_image_to_bucket
 
 # metadata-extracting chunkers
 from ingestion.text.extract_text_from_docx import extract_docx_text_metadata
 from ingestion.text.extract_text_from_pdf import extract_pdf_text_metadata
 from ingestion.text.extract_text_from_txt import extract_txt_text_metadata
 
-from embed.embeddings import embed_texts
-from data_upload.pinecone_service import upload_to_pinecone
+from embed.embeddings import embed_texts, embed_images
+from data_upload.pinecone_services import upload_to_pinecone
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
@@ -23,8 +24,8 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 load_dotenv()
 
 
-@router.post("/text", summary="Upload & ingest a text/pdf/docx file")
-async def ingest_text_file(
+@router.post("/upload-text-and-images", summary="Upload & ingest a text/pdf/docx/png/jpeg file")
+async def ingest_text_and_image_files(
     file: UploadFile = File(...),
 ):
     # temppppp
@@ -33,14 +34,28 @@ async def ingest_text_file(
     
     content = await file.read()
     ext = file.filename.rsplit(".", 1)[-1].lower()
+    suffix = f".{ext}"
 
+    supported_text = ("docx", "pdf", "txt", "md")
+    supported_images = ("png", "jpeg", "jpg")
+
+    if ext not in supported_text + supported_images:
+        raise HTTPException(400, detail=f"Unsupported file type: {ext}")
     
-    supa_path = upload_text_to_bucket(content, file.filename)
+
+
+    if ext in supported_images:
+        supa_path = upload_image_to_bucket(content, file.filename)
+    else:
+        supa_path = upload_text_to_bucket(content, file.filename)
+    
+    
+    
     if not supa_path:
         raise HTTPException(500, detail="Failed to upload to storage")
 
     
-    suffix = f".{ext}"
+    
     with NamedTemporaryFile(prefix="upload_", suffix=suffix, delete=False) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
@@ -54,18 +69,22 @@ async def ingest_text_file(
         elif ext in ("txt", "md"):
             meta_out = extract_txt_text_metadata(tmp_path, user_id)
         else:
-            raise HTTPException(400, detail=f"Unsupported file type: {ext}")
+            meta_out = {"text_chunks": []}
+        
 
         chunks: List[Dict[str, Any]] = meta_out.get("text_chunks", [])
     finally:
         os.unlink(tmp_path)
 
-    if not chunks:
+    if ext in supported_text and not chunks:
         raise HTTPException(422, detail="No text chunks were extracted")
 
     
     texts = [c["chunk_text"] for c in chunks]
-    embeddings = await embed_texts(texts)
+    if ext in supported_images:
+        embeddings = await embed_images([content])
+    else:
+        embeddings = await embed_texts(texts)
 
     # 5) upsert via Pinecone helper
     #    record_id can be the filename without extension,
@@ -80,7 +99,7 @@ async def ingest_text_file(
         vectors=embeddings,
         upload_date=upload_date,
     )
-
+    print(record_id)
     if not success:
         raise HTTPException(500, detail="Failed to upsert embeddings into Pinecone")
 
