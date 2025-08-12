@@ -1,6 +1,6 @@
 
 import os
-from data_upload.pinecone_service import upload_to_pinecone
+from data_upload.pinecone_services import upload_to_pinecone
 
 def test_upload_one_file(
     file_type: str = 'txt',
