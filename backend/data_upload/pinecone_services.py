@@ -42,3 +42,25 @@ def upsert_vectors(vectors: List[Dict[str, Any]], namespace: Optional[str] = Non
 def delete_vectors_by_ids(ids: List[str], namespace: Optional[str] = None) -> None:
     if ids:
         index.delete(ids=ids, namespace=namespace)
+
+from typing import Optional
+
+def query_vectors(
+    *,
+    vector: List[float],
+    top_k: int = 1,
+    namespace: Optional[str] = None,
+    metadata_filter: Optional[Dict[str, Any]] = None,
+    include_metadata: bool = True,
+):
+    """
+    Thin wrapper over Pinecone query that lets callers pass a metadata filter.
+    Example filter: {"modality": {"$eq": "text"}}
+    """
+    return index.query(
+        vector=vector,
+        top_k=top_k,
+        namespace=namespace,
+        filter=metadata_filter,
+        include_metadata=include_metadata,
+    )

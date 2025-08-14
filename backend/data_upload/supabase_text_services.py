@@ -20,6 +20,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TEXT_BUCKET = os.getenv("TEXT_BUCKET", "texts")
 
+
 def upload_text_to_bucket(file_content: bytes, filename: str, bucket: str = TEXT_BUCKET) -> Optional[str]:
     ext = os.path.splitext(filename)[1].lower()
     if ext not in [".txt", ".md", ".rtf", ".pdf", ".docx"]:
@@ -27,6 +28,7 @@ def upload_text_to_bucket(file_content: bytes, filename: str, bucket: str = TEXT
     file_path = f"uploads/{uuid4()}_{filename}"
     resp = supabase.storage.from_(bucket).upload(file_path, file_content)
     return file_path if resp else None
+
 
 def delete_text_from_bucket(filepath: str, bucket: str = TEXT_BUCKET) -> bool:
     try:
@@ -36,11 +38,14 @@ def delete_text_from_bucket(filepath: str, bucket: str = TEXT_BUCKET) -> bool:
         print(f"Deletion failed: {e}")
         return False
 
+
 def wipe_text_from_bucket(bucket: str = TEXT_BUCKET) -> str:
     return supabase.storage.empty_bucket(bucket)
 
+
 def _sha256_text(t: str) -> str:
     return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
 
 def _insert_chunk_rows(
     *,
@@ -64,9 +69,11 @@ def _insert_chunk_rows(
     data = supabase.table("app_chunks").insert(rows).execute()
     return data.data
 
+
 def _register_vectors(rows: List[Dict[str, Any]]) -> None:
     if rows:
         supabase.table("app_vector_registry").upsert(rows).execute()
+
 
 def ingest_text_chunks(
     *,
@@ -81,11 +88,18 @@ def ingest_text_chunks(
     namespace: Optional[str] = None,
     doc_id: Optional[str] = None,
     embedding_version: int = 1,
+    # NEW: optional per-chunk metadata merged into Pinecone vector metadata
+    # e.g. [{"page_number": 1, "char_start": 0, "char_end": 512, "preview": "..."}]
+    extra_vector_metadata: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     if len(text_chunks) != len(embed_text_vectors):
         raise ValueError("Number of text chunks must equal number of embeddings")
 
+    if extra_vector_metadata is not None and len(extra_vector_metadata) != len(text_chunks):
+        raise ValueError("extra_vector_metadata length must match number of text chunks")
+
     doc_id = doc_id or str(uuid4())
+
     # create app_chunks rows
     chunk_rows = _insert_chunk_rows(
         doc_id=doc_id,
@@ -96,8 +110,10 @@ def ingest_text_chunks(
     )
 
     vectors, registry = [], []
-    for emb, ch, text in zip(embed_text_vectors, chunk_rows, text_chunks):
+
+    for idx, (emb, ch, text) in enumerate(zip(embed_text_vectors, chunk_rows, text_chunks)):
         vector_id = f"{ch['chunk_id']}:{embedding_version}"
+
         metadata = {
             "user_id": user_id,
             "doc_id": ch["doc_id"],
@@ -113,6 +129,12 @@ def ingest_text_chunks(
             "title": filename,
             "upload_date": datetime.utcnow().date().isoformat(),
         }
+
+        # Merge any caller-provided per-chunk metadata (page_number, offsets, preview, etc.)
+        if extra_vector_metadata is not None:
+            extra = extra_vector_metadata[idx] or {}
+            metadata.update(extra)
+
         vectors.append(build_vector_item(vector_id=vector_id, values=emb, metadata=metadata))
         registry.append({
             "vector_id": vector_id,
