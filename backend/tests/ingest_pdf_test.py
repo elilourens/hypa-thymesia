@@ -1,4 +1,4 @@
-from ingestion.text.extract_text_from_pdf import extract_pdf_text_metadata
+from backend.ingestion.text.extract_text import extract_pdf_text_metadata
 from ingestion.text.extract_text_from_docx import extract_docx_text_metadata
 from ingestion.text.extract_text_from_txt import extract_txt_text_metadata
 from pathlib import Path

@@ -1,6 +1,6 @@
 from embed.text_embedder import embed as embed_text
 from embed.image_embedder import embed as embed_image
-from ingestion.text.extract_text_from_pdf import extract_pdf_text_metadata
+from backend.ingestion.text.extract_text import extract_pdf_text_metadata
 from typing import List
 
 
