@@ -33,7 +33,7 @@ async function login() {
     password: password.value
   })
   if (err) error.value = err.message
-  else router.push('/')
+  else router.push('/dashboard')
   loading.value = false
 }
 

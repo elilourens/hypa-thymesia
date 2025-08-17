@@ -22,11 +22,14 @@ TEXT_BUCKET = os.getenv("TEXT_BUCKET", "texts")
 
 
 def upload_text_to_bucket(file_content: bytes, filename: str, bucket: str = TEXT_BUCKET) -> Optional[str]:
+    # allow common text/doc types; reject others early
     ext = os.path.splitext(filename)[1].lower()
     if ext not in [".txt", ".md", ".rtf", ".pdf", ".docx"]:
         return None
     file_path = f"uploads/{uuid4()}_{filename}"
+    # Supabase Python storage returns a dict or raises; treat non-exception as success
     resp = supabase.storage.from_(bucket).upload(file_path, file_content)
+    # Some SDK versions return {'Key': 'path'} — treat truthy as success
     return file_path if resp else None
 
 
@@ -49,13 +52,18 @@ def _sha256_text(t: str) -> str:
 
 def _insert_chunk_rows(
     *,
+    user_id: str,                   # <-- NEW: required so we write ownership
     doc_id: str,
     storage_path: str,
     bucket: str,
     mime_type: str,
     text_chunks: List[str],
 ) -> List[Dict[str, Any]]:
-    rows = []
+    """
+    Inserts one row per text chunk into app_chunks, including user_id.
+    Returns the inserted rows (with chunk_id, etc.).
+    """
+    rows: List[Dict[str, Any]] = []
     for idx, _ in enumerate(text_chunks, start=1):
         rows.append({
             "chunk_id": str(uuid4()),
@@ -65,9 +73,10 @@ def _insert_chunk_rows(
             "storage_path": storage_path,
             "bucket": bucket,
             "mime_type": mime_type,
+            "user_id": user_id,     # <-- CRITICAL: enforce ownership at write time
         })
     data = supabase.table("app_chunks").insert(rows).execute()
-    return data.data
+    return data.data or []
 
 
 def _register_vectors(rows: List[Dict[str, Any]]) -> None:
@@ -77,7 +86,7 @@ def _register_vectors(rows: List[Dict[str, Any]]) -> None:
 
 def ingest_text_chunks(
     *,
-    user_id: str,
+    user_id: str,                             # <-- passed from router, used here
     filename: str,
     storage_path: str,
     text_chunks: List[str],
@@ -88,10 +97,11 @@ def ingest_text_chunks(
     namespace: Optional[str] = None,
     doc_id: Optional[str] = None,
     embedding_version: int = 1,
-    # NEW: optional per-chunk metadata merged into Pinecone vector metadata
+    # Optional per-chunk metadata merged into Pinecone vector metadata
     # e.g. [{"page_number": 1, "char_start": 0, "char_end": 512, "preview": "..."}]
     extra_vector_metadata: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
+    # Basic validations
     if len(text_chunks) != len(embed_text_vectors):
         raise ValueError("Number of text chunks must equal number of embeddings")
 
@@ -100,8 +110,9 @@ def ingest_text_chunks(
 
     doc_id = doc_id or str(uuid4())
 
-    # create app_chunks rows
+    # 1) create app_chunks rows (WITH user_id)
     chunk_rows = _insert_chunk_rows(
+        user_id=user_id,                    # <-- pass through
         doc_id=doc_id,
         storage_path=storage_path,
         bucket=TEXT_BUCKET,
@@ -109,12 +120,14 @@ def ingest_text_chunks(
         text_chunks=text_chunks,
     )
 
-    vectors, registry = [], []
+    # 2) build Pinecone vectors + registry rows
+    vectors: List[Dict[str, Any]] = []
+    registry: List[Dict[str, Any]] = []
 
     for idx, (emb, ch, text) in enumerate(zip(embed_text_vectors, chunk_rows, text_chunks)):
         vector_id = f"{ch['chunk_id']}:{embedding_version}"
 
-        metadata = {
+        metadata: Dict[str, Any] = {
             "user_id": user_id,
             "doc_id": ch["doc_id"],
             "chunk_id": ch["chunk_id"],
@@ -143,7 +156,10 @@ def ingest_text_chunks(
             "embedding_version": embedding_version,
         })
 
+    # 3) upsert vectors to Pinecone under tenant namespace (user_id)
     upsert_vectors(vectors, namespace=namespace or str(user_id))
+
+    # 4) register vectors in DB
     _register_vectors(registry)
 
     return {

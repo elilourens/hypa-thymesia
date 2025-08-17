@@ -22,10 +22,12 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 IMAGE_BUCKET = os.getenv("IMAGE_BUCKET", "images")
 
+
 def upload_image_to_bucket(file_content: bytes, filename: str, bucket: str = IMAGE_BUCKET) -> Optional[str]:
     ext = os.path.splitext(filename)[1].lower()
     if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
         return None
+    # validate it is an image
     try:
         img = Image.open(BytesIO(file_content))
         img.verify()
@@ -35,6 +37,7 @@ def upload_image_to_bucket(file_content: bytes, filename: str, bucket: str = IMA
     resp = supabase.storage.from_(bucket).upload(file_path, file_content)
     return file_path if resp else None
 
+
 def delete_image_from_bucket(filepath: str, bucket: str = IMAGE_BUCKET) -> bool:
     try:
         res = supabase.storage.from_(bucket).remove([filepath])
@@ -43,19 +46,26 @@ def delete_image_from_bucket(filepath: str, bucket: str = IMAGE_BUCKET) -> bool:
         print(f"Deletion failed: {e}")
         return False
 
+
 def wipe_images_from_bucket(bucket: str = IMAGE_BUCKET) -> str:
     return supabase.storage.empty_bucket(bucket)
+
 
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
+
 def _insert_single_image_chunk(
     *,
+    user_id: str,            # <-- NEW: plumb user_id into the insert
     doc_id: str,
     storage_path: str,
     bucket: str,
     mime_type: str,
 ) -> Dict[str, Any]:
+    """
+    Insert one image row into app_chunks, including user_id for ownership.
+    """
     row = {
         "chunk_id": str(uuid4()),
         "doc_id": doc_id,
@@ -64,13 +74,18 @@ def _insert_single_image_chunk(
         "storage_path": storage_path,
         "bucket": bucket,
         "mime_type": mime_type,
+        "user_id": user_id,   # <-- CRITICAL
     }
     data = supabase.table("app_chunks").insert(row).execute()
+    if not data.data:
+        raise RuntimeError("Insert into app_chunks returned no rows")
     return data.data[0]
+
 
 def _register_vectors(rows: List[Dict[str, Any]]) -> None:
     if rows:
         supabase.table("app_vector_registry").upsert(rows).execute()
+
 
 def ingest_single_image(
     *,
@@ -90,13 +105,17 @@ def ingest_single_image(
         raise ValueError("Expected exactly one image embedding")
 
     doc_id = doc_id or str(uuid4())
+
+    # Insert chunk with ownership
     chunk_row = _insert_single_image_chunk(
+        user_id=user_id,                 # <-- pass user_id here
         doc_id=doc_id,
         storage_path=storage_path,
         bucket=IMAGE_BUCKET,
         mime_type=mime_type,
     )
 
+    # Build vector + metadata
     emb = embed_image_vectors[0]
     vector_id = f"{chunk_row['chunk_id']}:{embedding_version}"
     metadata = {
@@ -116,7 +135,10 @@ def ingest_single_image(
     }
     vector_item = build_vector_item(vector_id=vector_id, values=emb, metadata=metadata)
 
+    # Upsert to Pinecone under the user's namespace (tenant isolation)
     upsert_vectors([vector_item], namespace=namespace or str(user_id))
+
+    # Register vector in DB
     _register_vectors([{
         "vector_id": vector_id,
         "chunk_id": chunk_row["chunk_id"],
