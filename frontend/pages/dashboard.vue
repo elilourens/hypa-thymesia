@@ -11,12 +11,15 @@
 
   <div>
     <UFileUpload
+      v-model="files"
+      multiple
       label="Drop your file here"
+      layout="list"
       description="PDF, DOCX, TXT, PNG, JPG"
       class="w-96 min-h-48"
-      @change="onFileChange"
       accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
     />
+    <UButton :disabled="files.length === 0" @click="onSubmit">Submit</UButton>
   </div>
 
   <div>
@@ -27,45 +30,40 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 const supabase = useSupabaseClient()
 const user = useSupabaseUser()
 const { data } = await supabase.auth.getSession()
 console.log("Session access token:", data.session?.access_token)
 
-async function onFileChange(e: Event) {
-  const target = e.target as HTMLInputElement
-  const files = target.files
-  if (!files || files.length === 0) {
-    console.warn("No file selected")
+const files = ref<File[]>([])           // ✅ holds selected files
+
+async function onSubmit() {
+  const file = files.value[0]
+  if (!file) return
+
+  // ⬇️ Get a fresh session on the client right now
+  const { data: ses } = await supabase.auth.getSession()
+  const accessToken = ses.session?.access_token
+  console.log('token prefix:', accessToken)
+  if (!accessToken) {
+    console.warn('No access token — user probably not logged in')
     return
   }
 
-  const file = files[0]!
-  console.log("Uploading file:", file.name)
-
   const formData = new FormData()
-  formData.append("file", file)
-  if (user.value?.id) {
-    formData.append("user_id", user.value.id) // required by backend
-  }
+  formData.append('file', file)
+  if (user.value?.id) formData.append('user_id', user.value.id)
 
-  try {
-    const res = await fetch("http://127.0.0.1:3000/ingest/upload-text-and-images", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${data.session?.access_token ?? ""}`,
-      },
-      body: formData,
-    })
+  const res = await fetch('http://127.0.0.1:8000/ingest/upload-text-and-images', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  })
 
-    if (!res.ok) {
-      throw new Error(`Upload failed: ${res.status} ${res.statusText}`)
-    }
-
-    const result = await res.json()
-    console.log("Upload success:", result)
-  } catch (err) {
-    console.error("Upload error:", err)
-  }
+  const text = await res.text()
+  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText} — ${text}`)
+  console.log('OK:', text)
 }
 </script>
