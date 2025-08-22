@@ -98,6 +98,10 @@ def ingest_text_chunks(
     if extra_vector_metadata is not None and len(extra_vector_metadata) != len(text_chunks):
         raise ValueError("extra_vector_metadata length must match number of text chunks")
 
+    # Optional early guard: all-MiniLM-L12-v2 is 384-D
+    if embedding_dim and embedding_dim != 384:
+        raise ValueError(f"Embedding dim mismatch for text: got {embedding_dim}, expected 384.")
+
     doc_id = doc_id or str(uuid4())
 
     chunk_rows = _insert_chunk_rows(
@@ -156,7 +160,8 @@ def ingest_text_chunks(
             "embedding_version": embedding_version,
         })
 
-    upsert_vectors(vectors, namespace=namespace or str(user_id))
+    # Route to the text index explicitly
+    upsert_vectors(vectors=vectors, modality="text", namespace=namespace or str(user_id))
     _register_vectors(registry)
 
     return {

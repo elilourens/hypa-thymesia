@@ -2,7 +2,7 @@
 from typing import List
 from sentence_transformers import SentenceTransformer
 
-_model = SentenceTransformer("clip-ViT-B-32")
+_model = SentenceTransformer("all-MiniLM-L12-v2")
 
 def embed(texts: List[str]) -> List[List[float]]:
     return _model.encode(texts, show_progress_bar=False).tolist()

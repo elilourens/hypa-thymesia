@@ -104,6 +104,10 @@ def ingest_single_image(
     if len(embed_image_vectors) != 1:
         raise ValueError("Expected exactly one image embedding")
 
+    # Optional early guard: CLIP ViT-B/32 is 512-D
+    if embedding_dim and embedding_dim != 512:
+        raise ValueError(f"Embedding dim mismatch for image: got {embedding_dim}, expected 512.")
+
     doc_id = doc_id or str(uuid4())
 
     # Insert chunk with ownership
@@ -136,7 +140,7 @@ def ingest_single_image(
     vector_item = build_vector_item(vector_id=vector_id, values=emb, metadata=metadata)
 
     # Upsert to Pinecone under the user's namespace (tenant isolation)
-    upsert_vectors([vector_item], namespace=namespace or str(user_id))
+    upsert_vectors(vectors=[vector_item], modality="image", namespace=namespace or str(user_id))
 
     # Register vector in DB
     _register_vectors([{
