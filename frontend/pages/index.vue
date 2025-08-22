@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h1>Welcome to My Nuxt App</h1>
+    <h1>Welcome to Mind Palace</h1>
     <p>This is the INDEX / homepage</p>
 
     <!-- NuxtLink is usually the cleanest -->

@@ -128,6 +128,7 @@ def ingest_text_chunks(
             "embedding_version": embedding_version,
             "content_sha256": _sha256_text(text),
             "title": filename,
+            "text": text,
             "upload_date": datetime.utcnow().date().isoformat(),
         }
 
