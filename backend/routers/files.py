@@ -1,0 +1,84 @@
+# routers/files.py
+from typing import Optional, Literal
+from fastapi import APIRouter, Depends, Query, HTTPException
+from pydantic import BaseModel
+from core.security import get_current_user, AuthUser
+from core.deps import get_supabase
+
+router = APIRouter(prefix="/files", tags=["files"])
+
+SortField = Literal["created_at", "size", "name"]
+SortDir = Literal["asc", "desc"]
+
+class FileItem(BaseModel):
+    doc_id: str
+    user_id: str
+    filename: str
+    bucket: str
+    storage_path: str
+    mime_type: str
+    modality: str
+    size_bytes: Optional[int] = None
+    chunk_count: int
+    created_at: str
+
+class FilesResponse(BaseModel):
+    items: list[FileItem]
+    page: int
+    page_size: int
+    total: int
+    has_next: bool
+
+@router.get("", response_model=FilesResponse)
+def list_files(
+    q: Optional[str] = Query(None, description="search in filename (case-insensitive)"),
+    modality: Optional[str] = Query(None, pattern="^(text|image)$"),
+    created_from: Optional[str] = Query(None, description="ISO date or timestamp"),
+    created_to: Optional[str] = Query(None, description="ISO date or timestamp"),
+    min_size: Optional[int] = Query(None, ge=0),
+    max_size: Optional[int] = Query(None, ge=0),
+    sort: SortField = Query("created_at"),
+    dir: SortDir = Query("desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    recent: Optional[bool] = Query(None, description="shortcut for sort=created_at desc"),
+    auth: AuthUser = Depends(get_current_user),
+    supabase = Depends(get_supabase),
+):
+    user_id = auth.id
+    if recent:
+        sort, dir = "created_at", "desc"
+
+    sb = supabase.table("app_docs").select("*", count="exact").eq("user_id", user_id)
+
+    if q:
+        sb = sb.ilike("filename", f"%{q}%")
+    if modality:
+        sb = sb.eq("modality", modality)
+    if created_from:
+        sb = sb.gte("created_at", created_from)
+    if created_to:
+        sb = sb.lte("created_at", created_to)
+    if min_size is not None:
+        sb = sb.gte("size_bytes", min_size)
+    if max_size is not None:
+        sb = sb.lte("size_bytes", max_size)
+
+    order_col = {"name": "filename", "size": "size_bytes"}.get(sort, "created_at")
+    sb = sb.order(order_col, desc=(dir == "desc"))
+
+    # Pagination
+    start = (page - 1) * page_size
+    end = start + page_size - 1
+    sb = sb.range(start, end)
+
+    resp = sb.execute()
+    items = resp.data or []
+    total = getattr(resp, "count", None) or 0
+    return FilesResponse(
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        has_next=(start + len(items)) < total,
+    )

@@ -47,6 +47,7 @@ async def ingest_text_and_image_files(
             namespace=user_id,
             doc_id=str(uuid4()),
             embedding_version=1,
+            size_bytes=len(content),
         )
         return {"doc_id": result["doc_id"], "chunks_ingested": result["vector_count"]}
 
@@ -92,5 +93,6 @@ async def ingest_text_and_image_files(
         doc_id=str(uuid4()),
         embedding_version=1,
         extra_vector_metadata=extra_metas,
+        size_bytes=len(content),
     )
     return {"doc_id": result["doc_id"], "chunks_ingested": result["vector_count"]}

@@ -18,9 +18,19 @@ const deleteDocId = ref('')
 const deleting = ref(false)
 const deleteMsg = ref<string|null>(null)
 
+const access_token = ref<string | null>(null)         // was: const access_token = token()
+token().then(t => { access_token.value = t ?? null }) // set once on load
+
+// keep it updated if the user logs in/out or refreshes the session
+supabase.auth.onAuthStateChange((_event, session) => {
+  access_token.value = session?.access_token ?? null
+})
+
 async function token() {
   const { data } = await supabase.auth.getSession()
+
   return data.session?.access_token
+
 }
 
 async function uploadFile() {
@@ -80,6 +90,8 @@ async function deleteFromResult(r:any) { deleteDocId.value = r?.metadata?.doc_id
 <template>
   <div class="space-y-6 max-w-xl">
     <p v-if="user">User: <b>{{ user.email }}</b></p>
+    <p v-if="access_token"> access_token: {{ access_token }}</p>
+"
 
     <!-- Upload --> 
      <div> 

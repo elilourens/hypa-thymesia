@@ -55,6 +55,7 @@ def _insert_chunk_rows(
     bucket: str,
     mime_type: str,
     text_chunks: List[str],
+    size_bytes: int | None = None,
 ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for idx, _ in enumerate(text_chunks, start=1):
@@ -67,6 +68,7 @@ def _insert_chunk_rows(
             "bucket": bucket,
             "mime_type": mime_type,
             "user_id": user_id,
+            **({"size_bytes": int(size_bytes)} if (idx == 1 and size_bytes is not None) else {}),
         })
     data = supabase.table("app_chunks").insert(rows).execute()
     return data.data or []
@@ -91,6 +93,7 @@ def ingest_text_chunks(
     doc_id: Optional[str] = None,
     embedding_version: int = 1,
     extra_vector_metadata: Optional[List[Dict[str, Any]]] = None,
+    size_bytes: int | None = None,
 ) -> Dict[str, Any]:
     if len(text_chunks) != len(embed_text_vectors):
         raise ValueError("Number of text chunks must equal number of embeddings")
@@ -111,6 +114,7 @@ def ingest_text_chunks(
         bucket=TEXT_BUCKET,
         mime_type=mime_type,
         text_chunks=text_chunks,
+        size_bytes=size_bytes,
     )
 
     vectors: List[Dict[str, Any]] = []

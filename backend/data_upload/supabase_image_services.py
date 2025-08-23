@@ -62,6 +62,7 @@ def _insert_single_image_chunk(
     storage_path: str,
     bucket: str,
     mime_type: str,
+    size_bytes: int | None = None,
 ) -> Dict[str, Any]:
     """
     Insert one image row into app_chunks, including user_id for ownership.
@@ -75,6 +76,7 @@ def _insert_single_image_chunk(
         "bucket": bucket,
         "mime_type": mime_type,
         "user_id": user_id,   # <-- CRITICAL
+        "size_bytes": int(size_bytes) if size_bytes is not None else None,
     }
     data = supabase.table("app_chunks").insert(row).execute()
     if not data.data:
@@ -100,6 +102,7 @@ def ingest_single_image(
     namespace: Optional[str] = None,
     doc_id: Optional[str] = None,
     embedding_version: int = 1,
+    size_bytes: int | None = None,
 ) -> Dict[str, Any]:
     if len(embed_image_vectors) != 1:
         raise ValueError("Expected exactly one image embedding")
@@ -117,6 +120,7 @@ def ingest_single_image(
         storage_path=storage_path,
         bucket=IMAGE_BUCKET,
         mime_type=mime_type,
+        size_bytes=size_bytes,
     )
 
     # Build vector + metadata
