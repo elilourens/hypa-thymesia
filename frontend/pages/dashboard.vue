@@ -3,7 +3,7 @@ import { ref } from 'vue'
 
 const supabase = useSupabaseClient()
 const user = useSupabaseUser()
-const API_BASE = useRuntimeConfig().public.apiBase ?? 'http://127.0.0.1:8000'
+const API_BASE = useRuntimeConfig().public.apiBase ?? 'http://127.0.0.1:8000/api/v1'
 
 const files = ref<File[]>([])
 const queryText = ref('')

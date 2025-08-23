@@ -1,26 +1,24 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers.ingest import router
+from routers import all_routers  # keep your current imports
 
+app = FastAPI(title="Hypa-Thymesia API")
 
-def create_app() -> FastAPI:
-    app = FastAPI()
+# Allow your Nuxt dev origins (adjust if you use a different port/host)
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-        ],
-        allow_credentials=False,  # keep False unless you're using cookies
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-        expose_headers=["Content-Length"],
-        max_age=86400,
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,   # do NOT use "*" with allow_credentials=True
+    allow_credentials=True,          # ok if you ever use cookies; harmless otherwise
+    allow_methods=["*"],             # or ["GET","POST","DELETE","OPTIONS"]
+    allow_headers=["*"],             # at least include "Authorization","Content-Type"
+)
 
-    app.include_router(router)  # your APIRouter from ingest.py
-    return app
-
-app = create_app()
+# keep your existing router mounting/prefix
+for r in all_routers:
+    app.include_router(r, prefix="/api/v1")
