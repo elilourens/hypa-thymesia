@@ -3,8 +3,26 @@
     <div class="w-full max-w-sm space-y-4">
       <h1 class="text-xl font-bold text-center">Auth</h1>
 
-      <UInput v-model="email" type="email" placeholder="Email" />
-      <UInput v-model="password" type="password" placeholder="Password" />
+      <div class="flex justify-between">
+          <UInput
+            color="primary"
+            v-model="email"
+            type="email"
+            placeholder="Email"
+            class="[&>input]:text-black [&>input::placeholder]:text-gray-400"
+          />
+
+          <UInput
+            color="primary"
+            v-model="password"
+            type="password"
+            placeholder="Password"
+            class="[&>input]:text-black [&>input::placeholder]:text-gray-400"
+          />
+      </div>
+      
+
+
 
       <UButton block :loading="loading" @click="login">Login</UButton>
       <UButton block :loading="loading" @click="signup" variant="outline">Sign up</UButton>
