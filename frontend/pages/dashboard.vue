@@ -103,7 +103,7 @@ async function deleteFromResult(r:any) { deleteDocId.value = r?.metadata?.doc_id
     <!-- Text query -->
     <div>
       <h2 class="font-semibold">Search (Text)</h2>
-      <UInput v-model="queryText" placeholder="Enter text query..." class="mb-2"/>
+      <UInput v-model="queryText" placeholder="Enter text query..." class="[&>input]:text-black [&>input::placeholder]:text-gray-400"/>
       <div class="flex gap-4 text-sm">
         <label><input type="radio" value="text" v-model="queryRoute"> text→text</label>
         <label><input type="radio" value="image" v-model="queryRoute"> text→image</label>
@@ -127,7 +127,7 @@ async function deleteFromResult(r:any) { deleteDocId.value = r?.metadata?.doc_id
     <div>
       <h2 class="font-semibold">Delete</h2>
       <div class="flex gap-2">
-        <UInput v-model="deleteDocId" placeholder="doc_id"/>
+        <UInput v-model="deleteDocId" placeholder="doc_id" class="[&>input]:text-black [&>input::placeholder]:text-gray-400"/>
         <UButton :disabled="deleting || !deleteDocId" @click="deleteDocumentById">
           {{ deleting ? 'Deleting…' : 'Delete' }}
         </UButton>

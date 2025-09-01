@@ -57,7 +57,8 @@ def list_files(
         sort, dir = "created_at", "desc"
 
     # Choose base: if sorting/filtering by group -> use the augmented view
-    base_table = "app_docs_with_group" if (group_id or group_sort != "none") else "app_docs"
+    base_table = "app_docs_with_group"  # always
+
 
     sb = supabase.table(base_table).select("*", count="exact").eq("user_id", user_id)
 

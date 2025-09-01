@@ -45,5 +45,6 @@ async def delete_document(
         except Exception as e:
             print(f"Storage delete failed for {bucket}/{path}: {e}")
 
-    supabase.table("app_chunks").delete().eq("doc_id", doc_id).eq("user_id", user_id).execute()
+    supabase.table("app_doc_meta").delete().eq("doc_id", doc_id).eq("user_id", user_id).execute()
+
     return {"deleted_vectors": len(text_ids) + len(image_ids), "deleted_files": len(files), "doc_id": doc_id, "status": "deleted"}
