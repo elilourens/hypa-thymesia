@@ -1,5 +1,5 @@
 <template>
-  <div class="bg-white text-black">
+  <div class="bg-white text-black border-b border-black">
     <div class="flex justify-between items-center mx-[5%] py-2">
       <!-- Left side -->
       <div class="flex items-center gap-2">
