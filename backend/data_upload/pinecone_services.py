@@ -1,4 +1,3 @@
-# data_upload/pinecone_services.py
 import os
 from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime
@@ -99,7 +98,7 @@ def delete_vectors_by_ids(
     index.delete(ids=ids, namespace=namespace)
 
 def query_vectors(
-    *,
+    *   ,
     vector: List[float],
     modality: Modality,
     top_k: int = 1,
@@ -123,3 +122,28 @@ def query_vectors(
         filter=metadata_filter,
         include_metadata=include_metadata,
     )
+
+def update_vectors_metadata(
+    *,
+    vector_ids: List[str],
+    modality: Modality,
+    namespace: Optional[str] = None,
+    set_metadata: Optional[Dict[str, Any]] = None,
+    delete_keys: Optional[List[str]] = None,
+) -> None:
+    """
+    Update or delete metadata on existing vectors WITHOUT re-upserting values.
+
+    Pinecone v5 has per-id update. We loop IDs to apply:
+      - set_metadata: dict of keys to set/overwrite
+      - delete_keys: list of keys to remove
+    """
+    if not vector_ids:
+        return
+    index, _ = _index_for_modality(modality)
+    ns = namespace
+    for vid in vector_ids:
+        if set_metadata:
+            index.update(id=vid, set_metadata=set_metadata, namespace=ns)
+        if delete_keys:
+            index.update(id=vid, delete_metadata=delete_keys, namespace=ns)

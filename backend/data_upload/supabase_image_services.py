@@ -1,4 +1,3 @@
-# data_upload/supabase_image_services.py
 import os
 import hashlib
 from typing import Optional, List, Dict, Any
@@ -27,7 +26,6 @@ def upload_image_to_bucket(file_content: bytes, filename: str, bucket: str = IMA
     ext = os.path.splitext(filename)[1].lower()
     if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
         return None
-    # validate it is an image
     try:
         img = Image.open(BytesIO(file_content))
         img.verify()
@@ -55,18 +53,22 @@ def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+def _ensure_doc_meta(*, user_id: str, doc_id: str, group_id: Optional[str]) -> None:
+    supabase.table("app_doc_meta").upsert(
+        {"doc_id": doc_id, "user_id": user_id, "group_id": group_id},
+        on_conflict="doc_id",
+    ).execute()
+
+
 def _insert_single_image_chunk(
     *,
-    user_id: str,            # <-- NEW: plumb user_id into the insert
+    user_id: str,
     doc_id: str,
     storage_path: str,
     bucket: str,
     mime_type: str,
     size_bytes: int | None = None,
 ) -> Dict[str, Any]:
-    """
-    Insert one image row into app_chunks, including user_id for ownership.
-    """
     row = {
         "chunk_id": str(uuid4()),
         "doc_id": doc_id,
@@ -75,7 +77,7 @@ def _insert_single_image_chunk(
         "storage_path": storage_path,
         "bucket": bucket,
         "mime_type": mime_type,
-        "user_id": user_id,   # <-- CRITICAL
+        "user_id": user_id,
         "size_bytes": int(size_bytes) if size_bytes is not None else None,
     }
     data = supabase.table("app_chunks").insert(row).execute()
@@ -98,24 +100,23 @@ def ingest_single_image(
     mime_type: str,
     embedding_model: str,
     embedding_dim: int,
-    embed_image_vectors: List[List[float]],  # already computed embeddings (len==1)
+    embed_image_vectors: List[List[float]],  # length==1
     namespace: Optional[str] = None,
     doc_id: Optional[str] = None,
     embedding_version: int = 1,
     size_bytes: int | None = None,
+    group_id: Optional[str] = None,  # NEW
 ) -> Dict[str, Any]:
     if len(embed_image_vectors) != 1:
         raise ValueError("Expected exactly one image embedding")
-
-    # Optional early guard: CLIP ViT-B/32 is 512-D
     if embedding_dim and embedding_dim != 512:
         raise ValueError(f"Embedding dim mismatch for image: got {embedding_dim}, expected 512.")
 
     doc_id = doc_id or str(uuid4())
+    _ensure_doc_meta(user_id=user_id, doc_id=doc_id, group_id=group_id)
 
-    # Insert chunk with ownership
     chunk_row = _insert_single_image_chunk(
-        user_id=user_id,                 # <-- pass user_id here
+        user_id=user_id,
         doc_id=doc_id,
         storage_path=storage_path,
         bucket=IMAGE_BUCKET,
@@ -123,7 +124,6 @@ def ingest_single_image(
         size_bytes=size_bytes,
     )
 
-    # Build vector + metadata
     emb = embed_image_vectors[0]
     vector_id = f"{chunk_row['chunk_id']}:{embedding_version}"
     metadata = {
@@ -141,12 +141,12 @@ def ingest_single_image(
         "title": filename,
         "upload_date": datetime.utcnow().date().isoformat(),
     }
-    vector_item = build_vector_item(vector_id=vector_id, values=emb, metadata=metadata)
+    if group_id:
+        metadata["group_id"] = group_id
 
-    # Upsert to Pinecone under the user's namespace (tenant isolation)
+    vector_item = build_vector_item(vector_id=vector_id, values=emb, metadata=metadata)
     upsert_vectors(vectors=[vector_item], modality="image", namespace=namespace or str(user_id))
 
-    # Register vector in DB
     _register_vectors([{
         "vector_id": vector_id,
         "chunk_id": chunk_row["chunk_id"],

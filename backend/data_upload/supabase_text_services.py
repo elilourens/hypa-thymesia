@@ -1,4 +1,3 @@
-# data_upload/supabase_text_services.py
 import os
 import hashlib
 from typing import Optional, List, Dict, Any
@@ -45,6 +44,16 @@ def wipe_text_from_bucket(bucket: str = TEXT_BUCKET) -> str:
 
 def _sha256_text(t: str) -> str:
     return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
+
+def _ensure_doc_meta(*, user_id: str, doc_id: str, group_id: Optional[str]) -> None:
+    """
+    app_docs is a VIEW; persist group ownership in app_doc_meta.
+    """
+    supabase.table("app_doc_meta").upsert(
+        {"doc_id": doc_id, "user_id": user_id, "group_id": group_id},
+        on_conflict="doc_id",
+    ).execute()
 
 
 def _insert_chunk_rows(
@@ -94,6 +103,7 @@ def ingest_text_chunks(
     embedding_version: int = 1,
     extra_vector_metadata: Optional[List[Dict[str, Any]]] = None,
     size_bytes: int | None = None,
+    group_id: Optional[str] = None,  # NEW: optional group assignment
 ) -> Dict[str, Any]:
     if len(text_chunks) != len(embed_text_vectors):
         raise ValueError("Number of text chunks must equal number of embeddings")
@@ -106,6 +116,9 @@ def ingest_text_chunks(
         raise ValueError(f"Embedding dim mismatch for text: got {embedding_dim}, expected 384.")
 
     doc_id = doc_id or str(uuid4())
+
+    # ensure meta row (stores group_id)
+    _ensure_doc_meta(user_id=user_id, doc_id=doc_id, group_id=group_id)
 
     chunk_rows = _insert_chunk_rows(
         user_id=user_id,
@@ -140,20 +153,19 @@ def ingest_text_chunks(
             "upload_date": datetime.utcnow().date().isoformat(),
         }
 
+        if group_id:
+            metadata["group_id"] = group_id
+
         if extra_vector_metadata is not None:
             extra = extra_vector_metadata[idx] or {}
-            # Keep page_number only if it's a real int
             if isinstance(extra.get("page_number"), int):
                 metadata["page_number"] = extra["page_number"]
-
-            # Copy other fields (char_start, char_end, preview, etc.)
             for k, v in extra.items():
                 if k == "page_number":
                     continue
                 if v is not None:
                     metadata[k] = v
 
-        # Strip any None values to avoid Pinecone "null" errors
         metadata = {k: v for k, v in metadata.items() if v is not None}
 
         vectors.append(build_vector_item(vector_id=vector_id, values=emb, metadata=metadata))
@@ -164,7 +176,6 @@ def ingest_text_chunks(
             "embedding_version": embedding_version,
         })
 
-    # Route to the text index explicitly
     upsert_vectors(vectors=vectors, modality="text", namespace=namespace or str(user_id))
     _register_vectors(registry)
 

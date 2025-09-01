@@ -1,4 +1,3 @@
-# routers/files.py
 from typing import Optional, Literal
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
@@ -9,6 +8,7 @@ router = APIRouter(prefix="/files", tags=["files"])
 
 SortField = Literal["created_at", "size", "name"]
 SortDir = Literal["asc", "desc"]
+GroupSort = Literal["none", "group_then_time"]
 
 class FileItem(BaseModel):
     doc_id: str
@@ -21,6 +21,10 @@ class FileItem(BaseModel):
     size_bytes: Optional[int] = None
     chunk_count: int
     created_at: str
+    # NEW (from app_docs_with_group view; may be null)
+    group_id: Optional[str] = None
+    group_name: Optional[str] = None
+    group_sort_index: Optional[int] = None
 
 class FilesResponse(BaseModel):
     items: list[FileItem]
@@ -42,6 +46,9 @@ def list_files(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     recent: Optional[bool] = Query(None, description="shortcut for sort=created_at desc"),
+    # NEW
+    group_id: Optional[str] = Query(None, description="filter by group"),
+    group_sort: GroupSort = Query("none", description="group_then_time = order by group then created_at desc"),
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
 ):
@@ -49,7 +56,10 @@ def list_files(
     if recent:
         sort, dir = "created_at", "desc"
 
-    sb = supabase.table("app_docs").select("*", count="exact").eq("user_id", user_id)
+    # Choose base: if sorting/filtering by group -> use the augmented view
+    base_table = "app_docs_with_group" if (group_id or group_sort != "none") else "app_docs"
+
+    sb = supabase.table(base_table).select("*", count="exact").eq("user_id", user_id)
 
     if q:
         sb = sb.ilike("filename", f"%{q}%")
@@ -63,11 +73,16 @@ def list_files(
         sb = sb.gte("size_bytes", min_size)
     if max_size is not None:
         sb = sb.lte("size_bytes", max_size)
+    if group_id:
+        sb = sb.eq("group_id", group_id)
 
-    order_col = {"name": "filename", "size": "size_bytes"}.get(sort, "created_at")
-    sb = sb.order(order_col, desc=(dir == "desc"))
+    if group_sort == "group_then_time":
+        sb = sb.order("group_sort_index", desc=False, nullsfirst=True) \
+               .order("created_at", desc=True)
+    else:
+        order_col = {"name": "filename", "size": "size_bytes"}.get(sort, "created_at")
+        sb = sb.order(order_col, desc=(dir == "desc"))
 
-    # Pagination
     start = (page - 1) * page_size
     end = start + page_size - 1
     sb = sb.range(start, end)

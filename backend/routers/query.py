@@ -10,7 +10,7 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 @router.post("/query", response_model=QueryResponse)
 async def query_endpoint(
-    req: QueryRequest,
+    req: QueryRequest,  # NOTE: ensure QueryRequest has Optional[str] group_id
     auth: AuthUser = Depends(get_current_user),
     settings = Depends(get_settings),
 ):
@@ -46,13 +46,17 @@ async def query_endpoint(
     else:
         raise HTTPException(500, detail="Internal routing error")
 
+    meta_filter = None
+    if getattr(req, "group_id", None):
+        meta_filter = {"group_id": {"$eq": req.group_id}}
+
     try:
         result = query_vectors(
             vector=vec,
             modality=modality_arg,
             top_k=req.top_k,
             namespace=user_id,
-            metadata_filter=None,
+            metadata_filter=meta_filter,
             include_metadata=True,
         )
     except Exception as e:

@@ -1,8 +1,9 @@
 import os, base64
 from uuid import uuid4
 from tempfile import NamedTemporaryFile
-from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Form
 from core.config import get_settings
 from core.deps import get_supabase
 from core.security import get_current_user, AuthUser
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 @router.post("/upload-text-and-images")
 async def ingest_text_and_image_files(
     file: UploadFile = File(...),
+    group_id: Optional[str] = Form(None),  # NEW: optional assignment
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
     settings = Depends(get_settings),
@@ -48,6 +50,7 @@ async def ingest_text_and_image_files(
             doc_id=str(uuid4()),
             embedding_version=1,
             size_bytes=len(content),
+            group_id=group_id,  # NEW
         )
         return {"doc_id": result["doc_id"], "chunks_ingested": result["vector_count"]}
 
@@ -94,5 +97,6 @@ async def ingest_text_and_image_files(
         embedding_version=1,
         extra_vector_metadata=extra_metas,
         size_bytes=len(content),
+        group_id=group_id,  # NEW
     )
     return {"doc_id": result["doc_id"], "chunks_ingested": result["vector_count"]}
