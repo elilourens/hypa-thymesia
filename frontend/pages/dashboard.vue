@@ -32,13 +32,12 @@ const active = computed<string>({
 <template>
   <div class="mx-auto">
     <!-- full-width bar styled with Nuxt UI tokens -->
-    <div class=" bg-slate-200 border-b border-default">
+    <div class="border-b border-default">
       <div class="mx-[5%] py-2">
         <UTabs
           v-model="active"
           :items="items"
           :content="false"
-          color="neutral"
           variant="pill"
           size="md"
           class="w-full"
