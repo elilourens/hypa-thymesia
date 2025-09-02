@@ -9,7 +9,11 @@ const items: TabsItem[] = [
   { label: 'Query',  value: 'query'  },
   { label: 'Upload', value: 'upload' },
   { label: 'List',   value: 'list'   },
-  { label: 'AI',     value: 'ai'     }
+  { label: 'AI',     value: 'ai'     },
+  { label: 'Docs',   value: 'docs'   },
+  { label: 'Settings', value: 'settings' },
+  { label: 'Account', value: 'account' },
+  { label: 'Usage', value: 'usage' },
 ]
 
 const active = computed<string>({
