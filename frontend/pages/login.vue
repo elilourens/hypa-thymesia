@@ -9,7 +9,7 @@
             v-model="email"
             type="email"
             placeholder="Email"
-            class="[&>input]:text-black [&>input::placeholder]:text-gray-400"
+            
           />
 
           <UInput
@@ -17,7 +17,7 @@
             v-model="password"
             type="password"
             placeholder="Password"
-            class="[&>input]:text-black [&>input::placeholder]:text-gray-400"
+            
           />
       </div>
       

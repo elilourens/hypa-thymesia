@@ -15,11 +15,12 @@ export function useIngest() {
   }
 
   // --- Upload ---
-  async function uploadFile(file: File) {
+  async function uploadFile(file: File, groupId?: string) {
     try {
       const headers = await authHeaders()
       const fd = new FormData()
       fd.append('file', file)
+      if (groupId) fd.append('group_id', groupId) // <-- pass groupId to backend
 
       await $fetch(`${API_BASE}/ingest/upload-text-and-images`, {
         method: 'POST',
