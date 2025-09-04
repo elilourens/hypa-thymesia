@@ -39,8 +39,7 @@ async function onDelete(id: string) {
 <template>
   <div class="space-y-4 max-w-xl">
     <h1 class="font-semibold text-lg">Search (Text)</h1>
-    <UInput v-model="queryTextInput" placeholder="Enter text query..."
-      class="[&>input]:text-black [&>input::placeholder]:text-gray-400"/>
+    <UInput v-model="queryTextInput" placeholder="Enter text query..."/>
     <div class="flex gap-4 text-sm">
       <label><input type="radio" value="text" v-model="queryRoute"> text→text</label>
       <label><input type="radio" value="image" v-model="queryRoute"> text→image</label>
