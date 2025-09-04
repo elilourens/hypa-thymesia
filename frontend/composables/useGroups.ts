@@ -6,7 +6,7 @@ export interface Group {
   sort_index?: number | null
 }
 
-// Shape the API *might* return
+// Possible API shapes (we normalize them)
 type ApiGroup =
   | { group_id: string; name: string; created_at: string; sort_index?: number | null }
   | { id: string; name: string; created_at: string; sort_index?: number | null }
@@ -23,6 +23,12 @@ function normalizeGroup(g: ApiGroup): Group {
   }
 }
 
+/**
+ * UI sentinel value for "No Group" selection in dropdowns.
+ * Use this in your list page to represent ungrouped files.
+ */
+export const NO_GROUP_VALUE = '__NO_GROUP__'
+
 export function useGroupsApi() {
   const supabase = useSupabaseClient()
   const API_BASE = useRuntimeConfig().public.apiBase ?? 'http://127.0.0.1:8000/api/v1'
@@ -37,6 +43,7 @@ export function useGroupsApi() {
     return { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' }
   }
 
+  /** ---------------- Read ---------------- */
   async function listGroups(): Promise<Group[]> {
     const headers = await authHeaders()
     const res = await $fetch<any>(`${API_BASE}/groups`, { method: 'GET', headers })
@@ -47,19 +54,65 @@ export function useGroupsApi() {
         : Array.isArray(res?.groups)
           ? res.groups
           : []
-
     return raw.map(normalizeGroup)
   }
 
-  async function createGroup(name: string): Promise<Group> {
+  /** ---------------- Create ---------------- */
+  async function createGroup(name: string, sort_index = 0): Promise<Group> {
     const headers = await authHeaders()
     const res = await $fetch<any>(`${API_BASE}/groups`, {
       method: 'POST',
       headers,
-      body: { name },
+      body: { name, sort_index }, // matches GroupIn
     })
     return normalizeGroup(res)
   }
 
-  return { listGroups, createGroup }
+  /** ---------------- Update (rename) ---------------- */
+  async function renameGroup(id: string, name: string): Promise<Group> {
+    const headers = await authHeaders()
+    const res = await $fetch<any>(`${API_BASE}/groups/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers,
+      body: { name }, // matches GroupRename
+    })
+    return normalizeGroup(res)
+  }
+
+  /** ---------------- Delete ---------------- */
+  async function deleteGroup(id: string): Promise<void> {
+    const headers = await authHeaders()
+    await $fetch<void>(`${API_BASE}/groups/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers,
+    })
+  }
+
+  /**
+   * ---------------- Assign/Clear a document's group ----------------
+   * Backend accepts:
+   *   { group: "<uuid-or-name>" } -> assign (creates by name if needed)
+   *   { group: null }             -> clear
+   */
+  async function setDocGroup(docId: string, group: string | null): Promise<{ ok: boolean; group_id?: string | null }> {
+    const headers = await authHeaders()
+    const res = await $fetch<{ ok: boolean; group_id?: string | null }>(
+      `${API_BASE}/groups/docs/${encodeURIComponent(docId)}/group`,
+      {
+        method: 'PUT',
+        headers,
+        body: { group },
+      }
+    )
+    return res
+  }
+
+  return {
+    listGroups,
+    createGroup,
+    renameGroup,
+    deleteGroup,
+    setDocGroup,
+    NO_GROUP_VALUE,
+  }
 }

@@ -29,7 +29,8 @@ export interface FilesResponse {
 
 export function useFilesApi() {
   const supabase = useSupabaseClient()
-  const API_BASE = useRuntimeConfig().public.apiBase ?? 'http://127.0.0.1:8000/api/v1'
+  const API_BASE =
+    useRuntimeConfig().public.apiBase ?? 'http://127.0.0.1:8000/api/v1'
 
   async function token() {
     const { data } = await supabase.auth.getSession()
@@ -58,12 +59,19 @@ export function useFilesApi() {
     group_sort?: GroupSort
   }): Promise<FilesResponse> {
     const headers = await authHeaders()
-    // Build search params (skip null/undefined)
     const sp = new URLSearchParams()
+
     Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') sp.set(k, String(v))
+      if (v !== undefined && v !== null) {
+        if (k === 'group_id') {
+          // ⚡ special case: allow empty string so backend can interpret as "no group"
+          sp.set(k, v as string)
+        } else if (v !== '') {
+          sp.set(k, String(v))
+        }
+      }
     })
-    // Defaults
+
     if (!sp.has('sort')) sp.set('sort', 'created_at')
     if (!sp.has('dir')) sp.set('dir', 'desc')
     if (!sp.has('page')) sp.set('page', '1')
@@ -71,10 +79,13 @@ export function useFilesApi() {
     if (!sp.has('group_sort')) sp.set('group_sort', 'none')
 
     try {
-      return await $fetch<FilesResponse>(`${API_BASE}/files?${sp.toString()}`, {
-        method: 'GET',
-        headers,
-      })
+      return await $fetch<FilesResponse>(
+        `${API_BASE}/files?${sp.toString()}`,
+        {
+          method: 'GET',
+          headers,
+        }
+      )
     } catch (err: any) {
       throw new Error(err?.data || err?.message || 'Failed to load files')
     }

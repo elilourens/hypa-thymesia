@@ -1,5 +1,5 @@
 from typing import Optional, Literal
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from core.security import get_current_user, AuthUser
 from core.deps import get_supabase
@@ -48,7 +48,10 @@ def list_files(
     recent: Optional[bool] = Query(None, description="shortcut for sort=created_at desc"),
     # NEW
     group_id: Optional[str] = Query(None, description="filter by group"),
-    group_sort: GroupSort = Query("none", description="group_then_time = order by group then created_at desc"),
+    group_sort: GroupSort = Query(
+        "none",
+        description="group_then_time = order by group then created_at desc"
+    ),
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
 ):
@@ -58,7 +61,6 @@ def list_files(
 
     # Choose base: if sorting/filtering by group -> use the augmented view
     base_table = "app_docs_with_group"  # always
-
 
     sb = supabase.table(base_table).select("*", count="exact").eq("user_id", user_id)
 
@@ -74,8 +76,13 @@ def list_files(
         sb = sb.gte("size_bytes", min_size)
     if max_size is not None:
         sb = sb.lte("size_bytes", max_size)
-    if group_id:
-        sb = sb.eq("group_id", group_id)
+
+    # 👇 handle group filter (UUID or "No Group")
+    if group_id is not None:
+        if group_id == "":
+            sb = sb.is_("group_id", None)   # only ungrouped
+        else:
+            sb = sb.eq("group_id", group_id)
 
     if group_sort == "group_then_time":
         sb = sb.order("group_sort_index", desc=False, nullsfirst=True) \
