@@ -19,6 +19,7 @@ async def query_endpoint(
 
     user_id = auth.id
 
+    # Routing
     if req.image_b64 is not None:
         chosen_route = "image"
     else:
@@ -29,6 +30,7 @@ async def query_endpoint(
         else:
             chosen_route = req.route
 
+    # Embeddings
     if chosen_route == "text":
         vec = (await embed_texts([req.query_text]))[0]
         modality_arg = "text"
@@ -46,9 +48,19 @@ async def query_endpoint(
     else:
         raise HTTPException(500, detail="Internal routing error")
 
+    # 🔑 Group filter logic
     meta_filter = None
-    if getattr(req, "group_id", None):
-        meta_filter = {"group_id": {"$eq": req.group_id}}
+    if req.group_id is not None:
+        if req.group_id == "":
+            # Special case: "ungrouped only"
+            meta_filter = {
+                "$or": [
+                    {"group_id": {"$exists": False}},
+                    {"group_id": {"$eq": None}},
+                ]
+            }
+        else:
+            meta_filter = {"group_id": {"$eq": req.group_id}}
 
     try:
         result = query_vectors(
@@ -72,3 +84,4 @@ async def query_endpoint(
     ]
 
     return QueryResponse(matches=matches, top_k=req.top_k, route=chosen_route, namespace=user_id)
+

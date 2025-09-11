@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { ref } from 'vue'
 import { useIngest } from '@/composables/useIngest'
-import { useGroupsApi, type Group } from '@/composables/useGroups'
+import { useGroupsApi } from '@/composables/useGroups'
+import GroupSelect from '@/components/GroupSelect.vue'
 
 const { uploadFile } = useIngest()
-const { listGroups, createGroup } = useGroupsApi()
+const { createGroup } = useGroupsApi()
 
 // UI state
 const files = ref<File[]>([])
@@ -12,31 +13,10 @@ const error = ref<string | null>(null)
 const success = ref<string | null>(null)
 const uploading = ref(false)
 
-// Groups
-const groups = ref<Group[]>([])
-const loadingGroups = ref(false)
-
 // Group mode: none, pick existing, or create new
 const groupMode = ref<'none' | 'existing' | 'create'>('none')
-const selectedGroupId = ref<string | undefined>(undefined)
+const selectedGroupId = ref<string | null>(null)
 const newGroupName = ref('')
-
-// Derived sorted groups
-const sortedGroups = computed(() =>
-  [...groups.value].sort(
-    (a, b) =>
-      (a.sort_index ?? 0) - (b.sort_index ?? 0) ||
-      a.name.localeCompare(b.name)
-  )
-)
-
-// Feed USelectMenu items
-const selectOptions = computed(() =>
-  sortedGroups.value.map(g => ({
-    label: g.name ?? '(unnamed)',
-    value: g.id,
-  }))
-)
 
 // Enable upload only when conditions are met
 const canUpload = computed(() => {
@@ -46,28 +26,6 @@ const canUpload = computed(() => {
   return true
 })
 
-async function refreshGroups() {
-  loadingGroups.value = true
-  error.value = null
-  try {
-    groups.value = await listGroups()
-  } catch (e: any) {
-    error.value = e?.message || 'Failed to load groups'
-    console.error('[groups error]', e)
-  } finally {
-    loadingGroups.value = false
-  }
-}
-
-// Keep selectedGroupId consistent if groups change
-watch(groups, () => {
-  if (selectedGroupId.value && !groups.value.some(g => g.id === selectedGroupId.value)) {
-    selectedGroupId.value = undefined
-  }
-})
-
-onMounted(refreshGroups)
-
 /** Resolve group by explicit mode */
 async function resolveGroupId(): Promise<string | undefined> {
   if (groupMode.value === 'create') {
@@ -75,7 +33,6 @@ async function resolveGroupId(): Promise<string | undefined> {
     if (!name) return undefined
     try {
       const g = await createGroup(name)
-      groups.value = [g, ...groups.value]
       selectedGroupId.value = g.id
       newGroupName.value = ''
       return g.id
@@ -138,73 +95,50 @@ async function doUpload(): Promise<void> {
     />
 
     <!-- Groups -->
-    <ClientOnly>
-      <div class="space-y-3">
-        <label class="block text-sm font-medium">Attach to a group</label>
+    <div class="space-y-3">
+      <label class="block text-sm font-medium">Attach to a group</label>
 
-        <!-- Mode switch -->
-        <div class="flex gap-2" role="tablist" aria-label="Group mode">
-          <UButton
-            :variant="groupMode === 'none' ? 'subtle' : 'ghost'"
-            @click="groupMode = 'none'"
-            aria-pressed="groupMode === 'none'"
-          >No group</UButton>
-          <UButton
-            :variant="groupMode === 'existing' ? 'subtle' : 'ghost'"
-            @click="groupMode = 'existing'"
-            aria-pressed="groupMode === 'existing'"
-          >Choose existing</UButton>
-          <UButton
-            :variant="groupMode === 'create' ? 'subtle' : 'ghost'"
-            @click="groupMode = 'create'"
-            aria-pressed="groupMode === 'create'"
-          >Create new</UButton>
-        </div>
-
-        <!-- Existing: show select -->
-        <div v-if="groupMode === 'existing'" class="flex items-center gap-2">
-          <USelectMenu
-            v-model="selectedGroupId"
-            :items="selectOptions"
-            value-key="value"
-            placeholder="Select a group…"
-            :loading="loadingGroups"
-            :search-input="{ placeholder: 'Search groups…' }"
-            icon="i-lucide-users"
-            class="w-72"
-            @update:open="(open) => { if (open && !groups.length) refreshGroups() }"
-          >
-            <template #empty>
-              <span class="text-muted">No groups found</span>
-            </template>
-          </USelectMenu>
-        </div>
-
-        <!-- Create: show input and button -->
-        <div v-else-if="groupMode === 'create'" class="flex items-center gap-2">
-          <UInput v-model="newGroupName" placeholder="New group name…" class="w-72" />
-          <UButton
-            :disabled="!newGroupName.trim() || uploading"
-            @click="async () => { await resolveGroupId() }"
-            variant="soft"
-          >
-            Create
-          </UButton>
-        </div>
-
-        <!-- None: hint -->
-        <p v-else class="text-xs text-gray-500">
-          Files will be uploaded ungrouped. You can organize them later.
-        </p>
+      <!-- Mode switch -->
+      <div class="flex gap-2" role="tablist" aria-label="Group mode">
+        <UButton
+          :variant="groupMode === 'none' ? 'subtle' : 'ghost'"
+          @click="groupMode = 'none'"
+          aria-pressed="groupMode === 'none'"
+        >No group</UButton>
+        <UButton
+          :variant="groupMode === 'existing' ? 'subtle' : 'ghost'"
+          @click="groupMode = 'existing'"
+          aria-pressed="groupMode === 'existing'"
+        >Choose existing</UButton>
+        <UButton
+          :variant="groupMode === 'create' ? 'subtle' : 'ghost'"
+          @click="groupMode = 'create'"
+          aria-pressed="groupMode === 'create'"
+        >Create new</UButton>
       </div>
 
-      <template #fallback>
-        <div class="space-y-2">
-          <div class="h-6 w-48 bg-gray-100 rounded" />
-          <div class="h-10 w-72 bg-gray-100 rounded" />
-        </div>
-      </template>
-    </ClientOnly>
+      <!-- Existing: use GroupSelect -->
+      <div v-if="groupMode === 'existing'" class="flex items-center gap-2">
+        <GroupSelect v-model="selectedGroupId" placeholder="Select a group…" />
+      </div>
+
+      <!-- Create: show input and button -->
+      <div v-else-if="groupMode === 'create'" class="flex items-center gap-2">
+        <UInput v-model="newGroupName" placeholder="New group name…" class="w-72" />
+        <UButton
+          :disabled="!newGroupName.trim() || uploading"
+          @click="async () => { await resolveGroupId() }"
+          variant="soft"
+        >
+          Create
+        </UButton>
+      </div>
+
+      <!-- None: hint -->
+      <p v-else class="text-xs text-gray-500">
+        Files will be uploaded ungrouped. You can organize them later.
+      </p>
+    </div>
 
     <!-- Actions -->
     <div class="flex items-center gap-3">

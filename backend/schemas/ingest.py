@@ -8,6 +8,7 @@ class QueryRequest(BaseModel):
     image_b64: Optional[str] = None
     top_k: int = Field(default=10, ge=1, le=200)
     route: Optional[str] = None  # "text" | "image" | None
+    group_id: Optional[str] = None 
 
 class QueryMatch(BaseModel):
     id: str
