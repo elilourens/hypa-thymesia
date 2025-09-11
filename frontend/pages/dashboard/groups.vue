@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, h, resolveComponent } from 'vue'   
 import type { TableColumn } from '@nuxt/ui'
 import { useGroupsApi, type Group } from '@/composables/useGroups'
+import BodyCard from '@/components/BodyCard.vue';
 
 const { listGroups, createGroup, deleteGroup } = useGroupsApi()
 
@@ -135,67 +136,70 @@ const columns: TableColumn<Group>[] = [
 </script>
 
 <template>
-  <div class="max-w-3xl w-full mx-auto">
-    <div class="flex items-center justify-between px-4 py-4">
-      <h1 class="text-lg font-semibold">Groups</h1>
-      <div class="text-sm text-muted">
-        Total: {{ groups.length.toLocaleString() }}
+  <BodyCard>
+    <div class=" w-full mx-auto">
+      <div class="flex items-center justify-between px-4 py-4">
+        <h1 class="text-lg font-semibold">Groups</h1>
+        <div class="text-sm text-muted">
+          Total: {{ groups.length.toLocaleString() }}
+        </div>
       </div>
-    </div>
 
-    <!-- Create -->
-    <div class="px-4 pb-4">
-      <div class="flex flex-wrap items-center gap-2">
-        <UInput
-          v-model="newName"
-          placeholder="New group name…"
-          class="w-64"
-        />
-        <UInput
-          v-model.number="newSortIndex"
-          type="number"
-          placeholder="Order (sort_index)"
-          class="w-40"
-        />
-        <UButton
-          :loading="creating"
-          :disabled="creating || !newName.trim()"
-          icon="i-lucide-plus"
-          @click="onCreate"
-        >
-          Create group
-        </UButton>
+      <!-- Create -->
+      <div class="px-4 pb-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <UInput
+            v-model="newName"
+            placeholder="New group name…"
+            class="w-64"
+          />
+          <UInput
+            v-model.number="newSortIndex"
+            type="number"
+            placeholder="Order (sort_index)"
+            class="w-40"
+          />
+          <UButton
+            :loading="creating"
+            :disabled="creating || !newName.trim()"
+            icon="i-lucide-plus"
+            @click="onCreate"
+          >
+            Create group
+          </UButton>
+        </div>
+        <p class="mt-2 text-xs text-muted">
+          Groups are ordered by <code>sort_index</code> then name.
+        </p>
       </div>
-      <p class="mt-2 text-xs text-muted">
-        Groups are ordered by <code>sort_index</code> then name.
-      </p>
+
+      <!-- List -->
+      <UTable
+        :data="sorted"
+        :columns="columns"
+        :loading="loading"
+        sticky
+        empty="No groups yet."
+        :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
+        class="px-2"
+      >
+        <template #loading>
+          <div class="py-6 text-sm px-4">Loading groups…</div>
+        </template>
+        <template #empty>
+          <div class="py-6 text-sm px-4">No groups yet. Create your first one above.</div>
+        </template>
+      </UTable>
+
+      <UAlert
+        v-if="error"
+        icon="i-heroicons-exclamation-triangle"
+        color="error"
+        :title="error"
+        variant="subtle"
+        class="mx-4 my-4"
+      />
     </div>
-
-    <!-- List -->
-    <UTable
-      :data="sorted"
-      :columns="columns"
-      :loading="loading"
-      sticky
-      empty="No groups yet."
-      :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
-      class="px-2"
-    >
-      <template #loading>
-        <div class="py-6 text-sm px-4">Loading groups…</div>
-      </template>
-      <template #empty>
-        <div class="py-6 text-sm px-4">No groups yet. Create your first one above.</div>
-      </template>
-    </UTable>
-
-    <UAlert
-      v-if="error"
-      icon="i-heroicons-exclamation-triangle"
-      color="error"
-      :title="error"
-      variant="subtle"
-      class="mx-4 my-4"
-    />
-  </div>
+  </BodyCard>
+  
 </template>

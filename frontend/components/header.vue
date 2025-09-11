@@ -9,7 +9,10 @@
 
       <!-- Right side -->
       <div class="flex gap-6">
-        <UButton icon="i-lucide-rocket" size="md" color="primary" variant="solid">Sign Up</UButton>
+        <div v-if="!$route.path.startsWith('/dashboard')">
+          <!-- Only shows if NOT on /dashboard -->
+          <UButton icon="i-lucide-rocket" size="md" color="primary" variant="solid">Sign Up</UButton>
+        </div>
         <a>Contact Us</a>
         <a>Use Cases</a>
         <a>Demo</a>

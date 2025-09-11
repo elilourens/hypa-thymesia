@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useIngest } from '@/composables/useIngest'
 import { NO_GROUP_VALUE } from '@/composables/useGroups'
 import GroupSelect from '@/components/GroupSelect.vue'
+import BodyCard from '@/components/BodyCard.vue';
 
 const { queryText, deleteDoc } = useIngest()
 
@@ -61,25 +62,28 @@ async function onDelete(id: string) {
 </script>
 
 <template>
-  <div class="space-y-4 max-w-xl">
-    <h1 class="font-semibold text-lg">Search</h1>
+  <BodyCard>
+    <div class="space-y-4 max-w-xl">
+      <h1 class="font-semibold text-lg">Search</h1>
 
-    <UInput v-model="queryTextInput" placeholder="Enter text query..."/>
+      <UInput v-model="queryTextInput" placeholder="Enter text query..."/>
 
-    <div class="flex gap-4 text-sm">
-      <label><input type="radio" value="text" v-model="queryRoute"> text→text</label>
-      <label><input type="radio" value="image" v-model="queryRoute"> text→image</label>
+      <div class="flex gap-4 text-sm">
+        <label><input type="radio" value="text" v-model="queryRoute"> text→text</label>
+        <label><input type="radio" value="image" v-model="queryRoute"> text→image</label>
+      </div>
+
+      <!-- Reusable GroupSelect -->
+      <GroupSelect v-model="selectedGroup" includeAll includeNoGroup />
+
+      <UButton :disabled="loading || !queryTextInput" @click="run">
+        {{ loading ? 'Searching…' : 'Search' }}
+      </UButton>
+
+      <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
+
+      <ResultList :results="results" :deleting="deleting" @delete="onDelete" />
     </div>
-
-    <!-- Reusable GroupSelect -->
-    <GroupSelect v-model="selectedGroup" includeAll includeNoGroup />
-
-    <UButton :disabled="loading || !queryTextInput" @click="run">
-      {{ loading ? 'Searching…' : 'Search' }}
-    </UButton>
-
-    <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
-
-    <ResultList :results="results" :deleting="deleting" @delete="onDelete" />
-  </div>
+  </BodyCard>
+  
 </template>

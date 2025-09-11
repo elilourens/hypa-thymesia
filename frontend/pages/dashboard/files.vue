@@ -12,6 +12,7 @@ import {
 import { useGroupsApi, NO_GROUP_VALUE } from '@/composables/useGroups'
 import { useIngest } from '@/composables/useIngest'
 import GroupSelect from '@/components/GroupSelect.vue'
+import BodyCard from '@/components/BodyCard.vue';
 
 const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
@@ -348,70 +349,73 @@ function getRowId(row: FileItem) {
 </script>
 
 <template>
-  <div class="flex-1 w-full">
-    <!-- Toolbar -->
-    <div class="flex items-center gap-2 px-4 py-3.5 border-b border-accented overflow-x-auto">
-      <UInput
-        v-model="filenameQuery"
-        class="max-w-sm min-w-[16ch]"
-        placeholder="Search filename…"
-        icon="i-heroicons-magnifying-glass-20-solid"
-      />
+  <BodyCard>
+    <div class="flex-1 w-full">
+      <!-- Toolbar -->
+      <div class="flex items-center gap-2 px-4 py-3.5 border-b border-accented overflow-x-auto">
+        <UInput
+          v-model="filenameQuery"
+          class="max-w-sm min-w-[16ch]"
+          placeholder="Search filename…"
+          icon="i-heroicons-magnifying-glass-20-solid"
+        />
 
-      <!-- ✅ Group filter (reusable component) -->
-      <GroupSelect v-model="selectedGroupId" :include-no-group="true" class="w-64" />
+        <!-- ✅ Group filter (reusable component) -->
+        <GroupSelect v-model="selectedGroupId" :include-no-group="true" class="w-64" />
 
-      <div class="ms-auto flex items-center gap-3 text-sm text-muted">
-        <span v-if="!pending">Total: {{ total.toLocaleString() }}</span>
-        <span v-else>Loading…</span>
+        <div class="ms-auto flex items-center gap-3 text-sm text-muted">
+          <span v-if="!pending">Total: {{ total.toLocaleString() }}</span>
+          <span v-else>Loading…</span>
+        </div>
       </div>
-    </div>
 
-    <!-- Table -->
-    <UTable
-      ref="table"
-      :data="data"
-      :columns="columns"
-      :loading="pending"
-      sticky
-      empty="No files found."
-      :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
-      :pagination="pagination"
-      :sorting="sorting"
-      :state="{ pagination, sorting }"
-      :onStateChange="() => {}"
-      :getRowId="getRowId"
-      class="flex-1"
-    >
-      <template #loading>
-        <div class="py-6 text-sm">Fetching files…</div>
-      </template>
-      <template #empty>
-        <div class="py-6 text-sm">Nothing to show.</div>
-      </template>
-    </UTable>
+      <!-- Table -->
+      <UTable
+        ref="table"
+        :data="data"
+        :columns="columns"
+        :loading="pending"
+        sticky
+        empty="No files found."
+        :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
+        :pagination="pagination"
+        :sorting="sorting"
+        :state="{ pagination, sorting }"
+        :onStateChange="() => {}"
+        :getRowId="getRowId"
+        class="flex-1"
+      >
+        <template #loading>
+          <div class="py-6 text-sm">Fetching files…</div>
+        </template>
+        <template #empty>
+          <div class="py-6 text-sm">Nothing to show.</div>
+        </template>
+      </UTable>
 
-    <!-- Footer -->
-    <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
-      <div>
-        Page {{ pagination.pageIndex + 1 }} •
-        Showing {{ data.length }} / {{ total.toLocaleString() }}
+      <!-- Footer -->
+      <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
+        <div>
+          Page {{ pagination.pageIndex + 1 }} •
+          Showing {{ data.length }} / {{ total.toLocaleString() }}
+        </div>
+        <UPagination
+          :default-page="pagination.pageIndex + 1"
+          :items-per-page="pagination.pageSize"
+          :total="total"
+          @update:page="(p: number) => (pagination.pageIndex = p - 1)"
+        />
       </div>
-      <UPagination
-        :default-page="pagination.pageIndex + 1"
-        :items-per-page="pagination.pageSize"
-        :total="total"
-        @update:page="(p: number) => (pagination.pageIndex = p - 1)"
+
+      <UAlert
+        v-if="error"
+        icon="i-heroicons-exclamation-triangle"
+        color="error"
+        :title="error"
+        variant="subtle"
+        class="mx-4 mb-4"
       />
     </div>
-
-    <UAlert
-      v-if="error"
-      icon="i-heroicons-exclamation-triangle"
-      color="error"
-      :title="error"
-      variant="subtle"
-      class="mx-4 mb-4"
-    />
-  </div>
+  </BodyCard>
+  
 </template>

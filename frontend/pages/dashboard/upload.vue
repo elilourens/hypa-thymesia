@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useIngest } from '@/composables/useIngest'
 import { useGroupsApi } from '@/composables/useGroups'
 import GroupSelect from '@/components/GroupSelect.vue'
+import BodyCard from '@/components/BodyCard.vue';
 
 const { uploadFile } = useIngest()
 const { createGroup } = useGroupsApi()
@@ -80,7 +81,8 @@ async function doUpload(): Promise<void> {
 </script>
 
 <template>
-  <div class="space-y-5 max-w-xl">
+  <BodyCard>
+    <div class="space-y-5 max-w-xl">
     <h1 class="font-semibold text-lg">Upload Files</h1>
 
     <!-- Files -->
@@ -154,4 +156,6 @@ async function doUpload(): Promise<void> {
     <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
     <p v-if="success" class="text-green-600 text-sm">{{ success }}</p>
   </div>
+  </BodyCard>
+  
 </template>
