@@ -82,80 +82,85 @@ async function doUpload(): Promise<void> {
 
 <template>
   <BodyCard>
-    <div class="space-y-5 max-w-xl">
-    <h1 class="font-semibold text-lg">Upload Files</h1>
+    <h1 class="font-semibold text-lg mb-4">Upload Files</h1>
 
-    <!-- Files -->
-    <UFileUpload
-      v-model="files"
-      multiple
-      label="Drop your file here"
-      layout="list"
-      description="PDF, DOCX, TXT, PNG, JPG"
-      class="w-96 min-h-48"
-      accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
-    />
-
-    <!-- Groups -->
-    <div class="space-y-3">
-      <label class="block text-sm font-medium">Attach to a group</label>
-
-      <!-- Mode switch -->
-      <div class="flex gap-2" role="tablist" aria-label="Group mode">
-        <UButton
-          :variant="groupMode === 'none' ? 'subtle' : 'ghost'"
-          @click="groupMode = 'none'"
-          aria-pressed="groupMode === 'none'"
-        >No group</UButton>
-        <UButton
-          :variant="groupMode === 'existing' ? 'subtle' : 'ghost'"
-          @click="groupMode = 'existing'"
-          aria-pressed="groupMode === 'existing'"
-        >Choose existing</UButton>
-        <UButton
-          :variant="groupMode === 'create' ? 'subtle' : 'ghost'"
-          @click="groupMode = 'create'"
-          aria-pressed="groupMode === 'create'"
-        >Create new</UButton>
+    <div class="flex items-start gap-6">
+      <!-- Left side: Files -->
+      <div class="space-y-5">
+        <UFileUpload
+          v-model="files"
+          multiple
+          label="Drop your file here"
+          layout="list"
+          description="PDF, DOCX, TXT, PNG, JPG"
+          class="w-96 min-h-48"
+          accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
+        />
       </div>
 
-      <!-- Existing: use GroupSelect -->
-      <div v-if="groupMode === 'existing'" class="flex items-center gap-2">
-        <GroupSelect v-model="selectedGroupId" placeholder="Select a group…" />
-      </div>
+      <!-- Divider -->
+      <USeparator orientation="vertical" class="h-auto self-stretch" />
 
-      <!-- Create: show input and button -->
-      <div v-else-if="groupMode === 'create'" class="flex items-center gap-2">
-        <UInput v-model="newGroupName" placeholder="New group name…" class="w-72" />
-        <UButton
-          :disabled="!newGroupName.trim() || uploading"
-          @click="async () => { await resolveGroupId() }"
-          variant="soft"
-        >
-          Create
-        </UButton>
-      </div>
+      <!-- Right side: Groups -->
+      <div class="space-y-3">
+        <label class="block text-sm font-medium">Attach to a group</label>
 
-      <!-- None: hint -->
-      <p v-else class="text-xs text-gray-500">
-        Files will be uploaded ungrouped. You can organize them later.
-      </p>
+        <!-- Mode switch -->
+        <div class="flex gap-2" role="tablist" aria-label="Group mode">
+          <UButton
+            :variant="groupMode === 'none' ? 'subtle' : 'ghost'"
+            @click="groupMode = 'none'"
+            aria-pressed="groupMode === 'none'"
+          >No group</UButton>
+          <UButton
+            :variant="groupMode === 'existing' ? 'subtle' : 'ghost'"
+            @click="groupMode = 'existing'"
+            aria-pressed="groupMode === 'existing'"
+          >Choose existing</UButton>
+          <UButton
+            :variant="groupMode === 'create' ? 'subtle' : 'ghost'"
+            @click="groupMode = 'create'"
+            aria-pressed="groupMode === 'create'"
+          >Create new</UButton>
+        </div>
+
+        <!-- Existing: use GroupSelect -->
+        <div v-if="groupMode === 'existing'" class="flex items-center gap-2">
+          <GroupSelect v-model="selectedGroupId" placeholder="Select a group…" />
+        </div>
+
+        <!-- Create: show input and button -->
+        <div v-else-if="groupMode === 'create'" class="flex items-center gap-2">
+          <UInput v-model="newGroupName" placeholder="New group name…" class="w-72" />
+          <UButton
+            :disabled="!newGroupName.trim() || uploading"
+            @click="async () => { await resolveGroupId() }"
+            variant="soft"
+          >
+            Create
+          </UButton>
+        </div>
+
+        <!-- None: hint -->
+        <p v-else class="text-xs text-gray-500">
+          Files will be uploaded ungrouped. You can organize them later.
+        </p>
+
+        <!-- Actions -->
+        <div class="flex items-center gap-3">
+          <UButton :disabled="!canUpload" @click="doUpload">
+            {{ uploading ? 'Uploading…' : 'Upload' }}
+          </UButton>
+          <span v-if="files.length" class="text-xs text-gray-500">
+            {{ files.length }} file{{ files.length === 1 ? '' : 's' }} selected
+          </span>
+        </div>
+
+        <!-- Messages -->
+        <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
+        <p v-if="success" class="text-green-600 text-sm">{{ success }}</p>
+      </div>
     </div>
-
-    <!-- Actions -->
-    <div class="flex items-center gap-3">
-      <UButton :disabled="!canUpload" @click="doUpload">
-        {{ uploading ? 'Uploading…' : 'Upload' }}
-      </UButton>
-      <span v-if="files.length" class="text-xs text-gray-500">
-        {{ files.length }} file{{ files.length === 1 ? '' : 's' }} selected
-      </span>
-    </div>
-
-    <!-- Messages -->
-    <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
-    <p v-if="success" class="text-green-600 text-sm">{{ success }}</p>
-  </div>
   </BodyCard>
-  
 </template>
+

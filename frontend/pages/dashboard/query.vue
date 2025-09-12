@@ -1,21 +1,27 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import type { RadioGroupItem } from '@nuxt/ui'
 import { useIngest } from '@/composables/useIngest'
 import { NO_GROUP_VALUE } from '@/composables/useGroups'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue';
 
-const { queryText, deleteDoc } = useIngest()
+const { queryText } = useIngest()
 
 const queryRoute = ref<'text'|'image'>('text')
 const queryTextInput = ref('')
 const loading = ref(false)
 const error = ref<string|null>(null)
 const results = ref<any[]>([])
-const deleting = ref(false)
 
-// Use reusable GroupSelect
+// Group selection
 const selectedGroup = ref<string | null>(null) // null = All groups
+
+// Radio items for route selection
+const routeItems: RadioGroupItem[] = [
+  { value: 'text', label: 'Text' },
+  { value: 'image', label: 'Images' }
+]
 
 // ---- Actions ----
 async function run() {
@@ -47,43 +53,42 @@ async function run() {
     loading.value = false
   }
 }
-
-async function onDelete(id: string) {
-  try {
-    deleting.value = true
-    await deleteDoc(id)
-    results.value = results.value.filter(m => m?.metadata?.doc_id !== id)
-  } catch (e:any) {
-    error.value = e?.message ?? 'Delete failed'
-  } finally {
-    deleting.value = false
-  }
-}
 </script>
 
 <template>
   <BodyCard>
-    <div class="space-y-4 max-w-xl">
-      <h1 class="font-semibold text-lg">Search</h1>
+    <div class="space-y-6 max-w-3xl mx-auto">
+      <h1 class="font-semibold text-xl">Search</h1>
 
-      <UInput v-model="queryTextInput" placeholder="Enter text query..."/>
+      <!-- Larger search bar -->
+      <UInput
+        v-model="queryTextInput"
+        size="xl"
+        placeholder="Enter your search..."
+        class="w-full text-lg py-4"
+      />
 
-      <div class="flex gap-4 text-sm">
-        <label><input type="radio" value="text" v-model="queryRoute"> text→text</label>
-        <label><input type="radio" value="image" v-model="queryRoute"> text→image</label>
+      <!-- Radio + GroupSelect on same line -->
+      <div class="flex flex-col sm:flex-row gap-4 ">
+        <URadioGroup
+          v-model="queryRoute"
+          orientation="horizontal"
+          variant="list"
+          :items="routeItems"
+        />
+        <GroupSelect v-model="selectedGroup" includeAll includeNoGroup />
       </div>
 
-      <!-- Reusable GroupSelect -->
-      <GroupSelect v-model="selectedGroup" includeAll includeNoGroup />
+      <div class="flex justify-center">
+        <UButton :disabled="loading || !queryTextInput" @click="run">
+          {{ loading ? 'Searching…' : 'Search' }}
+        </UButton>
+      </div>
 
-      <UButton :disabled="loading || !queryTextInput" @click="run">
-        {{ loading ? 'Searching…' : 'Search' }}
-      </UButton>
+      <p v-if="error" class="text-red-500 text-sm text-center">{{ error }}</p>
 
-      <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
-
-      <ResultList :results="results" :deleting="deleting" @delete="onDelete" />
+      <!-- Results (no delete feature) -->
+      <ResultList :results="results" />
     </div>
   </BodyCard>
-  
 </template>
