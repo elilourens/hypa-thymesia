@@ -1,29 +1,30 @@
 <script setup lang="ts">
 const props = defineProps<{ results: any[], deleting?: boolean }>()
-const emit = defineEmits<{ (e: 'delete', id: string): void }>()
+
+
+// Helper to extract filename from storage_path
+function getFileName(path?: string) {
+  if (!path) return '(unknown file)'
+  return path.split('_').pop() || path
+}
 </script>
 
 <template>
-  <ul v-if="results?.length" class="mt-4 space-y-2">
-    <li v-for="r in results" :key="r.id" class="border p-2 rounded">
-      <div class="flex items-start justify-between gap-2">
-        <div class="flex-1">
-          <p class="text-xs text-gray-500">Score: {{ r.score?.toFixed?.(3) ?? r.score }}</p>
-          <p class="text-xs text-gray-500">Doc: <b>{{ r.metadata?.doc_id || '(unknown)' }}</b></p>
-          <p v-if="(r.metadata?.modality||'').toLowerCase()==='text'">
-            {{ r.metadata?.text || '(no preview)' }}
-          </p>
-          <p v-else>{{ r.metadata?.title || '(image)' }}</p>
-        </div>
-        <UButton
-          v-if="r.metadata?.doc_id"
-          variant="soft"
-          :disabled="props.deleting"
-          @click="emit('delete', r.metadata.doc_id)"
-        >
-          {{ props.deleting ? 'Deleting…' : 'Delete doc' }}
-        </UButton>
+  <div v-if="results?.length" 
+       class=" grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-4">
+    <UCard v-for="r in results" :key="r.id" class="flex flex-col justify-between">
+      <div class="flex-1 space-y-1">
+        <p class="text-xs text-gray-500">Score: {{ r.score?.toFixed?.(3) ?? r.score }}</p>
+        <p class="text-xs text-gray-500">File: <strong>{{ getFileName(r.metadata?.storage_path) }}</strong><b></b></p>
+        <USeparator orientation="horizontal" class="h-auto self-stretch" size="lg"/>
+
+        <p v-if="(r.metadata?.modality||'').toLowerCase()==='text'">
+          {{ r.metadata?.text || '(no preview)' }}
+        </p>
+        <p v-else>{{ r.metadata?.title || '(image)' }}</p>
       </div>
-    </li>
-  </ul>
+
+      
+    </UCard>
+  </div>
 </template>

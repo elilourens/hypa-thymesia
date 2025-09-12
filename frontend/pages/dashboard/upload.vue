@@ -99,7 +99,7 @@ async function doUpload(): Promise<void> {
       </div>
 
       <!-- Divider -->
-      <USeparator orientation="vertical" class="h-auto self-stretch" />
+      <USeparator orientation="vertical" class="h-auto self-stretch" size="lg"/>
 
       <!-- Right side: Groups -->
       <div class="space-y-3">

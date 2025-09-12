@@ -5,6 +5,7 @@ import { useIngest } from '@/composables/useIngest'
 import { NO_GROUP_VALUE } from '@/composables/useGroups'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue';
+import ResultList from '@/components/ResultList.vue'
 
 const { queryText } = useIngest()
 
@@ -61,15 +62,23 @@ async function run() {
       <h1 class="font-semibold text-xl">Search</h1>
 
       <!-- Larger search bar -->
-      <UInput
-        v-model="queryTextInput"
-        size="xl"
-        placeholder="Enter your search..."
-        class="w-full text-lg py-4"
-      />
+       <div class="flex flex-col sm:flex-row gap-4 ">
+        <UInput
+          v-model="queryTextInput"
+          size="xl"
+          placeholder="Enter your search..."
+          class="w-full text-lg"
+        />
+        <div class="flex justify-center">
+          <UButton :disabled="loading || !queryTextInput" @click="run">
+            {{ loading ? 'Searching…' : 'Search' }}
+          </UButton>
+        </div>
+       </div>
+      
 
       <!-- Radio + GroupSelect on same line -->
-      <div class="flex flex-col sm:flex-row gap-4 ">
+      <div class="flex flex-col sm:flex-row gap-4 justify-between">
         <URadioGroup
           v-model="queryRoute"
           orientation="horizontal"
@@ -79,16 +88,18 @@ async function run() {
         <GroupSelect v-model="selectedGroup" includeAll includeNoGroup />
       </div>
 
-      <div class="flex justify-center">
-        <UButton :disabled="loading || !queryTextInput" @click="run">
-          {{ loading ? 'Searching…' : 'Search' }}
-        </UButton>
-      </div>
+      <USeparator orientation="horizontal" class="h-auto self-stretch" size="lg"/>
+
+      
 
       <p v-if="error" class="text-red-500 text-sm text-center">{{ error }}</p>
 
       <!-- Results (no delete feature) -->
-      <ResultList :results="results" />
+      
     </div>
   </BodyCard>
+  <div class="m-10 p-2">
+    <ResultList :results="results" />
+  </div>
+  
 </template>
