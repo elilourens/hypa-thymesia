@@ -2,6 +2,7 @@ import base64
 from fastapi import APIRouter, Depends, HTTPException
 from core.security import get_current_user, AuthUser
 from core.config import get_settings
+from core.deps import get_supabase   # 👈 add this
 from schemas.ingest import QueryRequest, QueryResponse, QueryMatch
 from embed.embeddings import embed_texts, embed_images, embed_clip_texts
 from data_upload.pinecone_services import query_vectors
@@ -10,9 +11,10 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 @router.post("/query", response_model=QueryResponse)
 async def query_endpoint(
-    req: QueryRequest,  # NOTE: ensure QueryRequest has Optional[str] group_id
+    req: QueryRequest,
     auth: AuthUser = Depends(get_current_user),
     settings = Depends(get_settings),
+    supabase = Depends(get_supabase),   # 👈 inject supabase client
 ):
     if bool(req.query_text) == bool(req.image_b64):
         raise HTTPException(422, detail="Provide exactly one of 'query_text' or 'image_b64'.")
@@ -48,11 +50,10 @@ async def query_endpoint(
     else:
         raise HTTPException(500, detail="Internal routing error")
 
-    # 🔑 Group filter logic
+    # Group filter
     meta_filter = None
     if req.group_id is not None:
         if req.group_id == "":
-            # Special case: "ungrouped only"
             meta_filter = {
                 "$or": [
                     {"group_id": {"$exists": False}},
@@ -74,14 +75,30 @@ async def query_endpoint(
     except Exception as e:
         raise HTTPException(500, detail=f"Pinecone query failed: {e}")
 
-    matches = [
-        QueryMatch(
-            id=(m["id"] if isinstance(m, dict) else getattr(m, "id", "")),
-            score=(m["score"] if isinstance(m, dict) else getattr(m, "score", 0.0)),
-            metadata=(m["metadata"] if isinstance(m, dict) else getattr(m, "metadata", {}) or {}),
+    matches = []
+    for m in getattr(result, "matches", []) or []:
+        md = m["metadata"] if isinstance(m, dict) else getattr(m, "metadata", {}) or {}
+        bucket = md.get("bucket")
+        storage_path = md.get("storage_path")
+
+        signed_url = None
+        if bucket and storage_path and md.get("modality") == "image":
+            try:
+                res = supabase.storage.from_(bucket).create_signed_url(
+                    storage_path, expires_in=3600
+                )
+                signed_url = res.get("signedURL")
+            except Exception as e:
+                print(f"Signed URL creation failed: {e}")
+
+        md = md | {"signed_url": signed_url}
+
+        matches.append(
+            QueryMatch(
+                id=m["id"] if isinstance(m, dict) else getattr(m, "id", ""),
+                score=m["score"] if isinstance(m, dict) else getattr(m, "score", 0.0),
+                metadata=md,
+            )
         )
-        for m in getattr(result, "matches", []) or []
-    ]
 
     return QueryResponse(matches=matches, top_k=req.top_k, route=chosen_route, namespace=user_id)
-

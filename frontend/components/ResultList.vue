@@ -11,20 +11,39 @@ function getFileName(path?: string) {
 
 <template>
   <div v-if="results?.length" 
-       class=" grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-4">
+       class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-4">
     <UCard v-for="r in results" :key="r.id" class="flex flex-col justify-between">
       <div class="flex-1 space-y-1">
-        <p class="text-xs text-gray-500">Score: {{ r.score?.toFixed?.(3) ?? r.score }}</p>
-        <p class="text-xs text-gray-500">File: <strong>{{ getFileName(r.metadata?.storage_path) }}</strong><b></b></p>
+        <!-- Score as percentage -->
+        <p class="text-xs text-gray-500">
+          Score: {{ (r.score * 100).toFixed(1) }}%
+        </p>
+
+        <p class="text-xs text-gray-500">
+          File: <strong>{{ getFileName(r.metadata?.storage_path) }}</strong>
+        </p>
         <USeparator orientation="horizontal" class="h-auto self-stretch" size="lg"/>
 
+        <!-- Render text hits -->
         <p v-if="(r.metadata?.modality||'').toLowerCase()==='text'">
           {{ r.metadata?.text || '(no preview)' }}
         </p>
-        <p v-else>{{ r.metadata?.title || '(image)' }}</p>
-      </div>
 
-      
+        <!-- Render image hits -->
+        <div v-else-if="(r.metadata?.modality||'').toLowerCase()==='image'">
+          <img 
+            v-if="r.metadata?.signed_url"
+            :src="r.metadata.signed_url" 
+            :alt="r.metadata?.title || 'image result'" 
+            class="object-contain mx-auto p-2"
+          />
+          <p v-else>{{ r.metadata?.title || '(image)' }}</p>
+        </div>
+
+        <!-- Fallback -->
+        <p v-else>{{ r.metadata?.title || '(unknown modality)' }}</p>
+      </div>
     </UCard>
   </div>
 </template>
+
