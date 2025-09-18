@@ -2,10 +2,13 @@ import base64
 from fastapi import APIRouter, Depends, HTTPException
 from core.security import get_current_user, AuthUser
 from core.config import get_settings
-from core.deps import get_supabase   # 👈 add this
+from core.deps import get_supabase
 from schemas.ingest import QueryRequest, QueryResponse, QueryMatch
 from embed.embeddings import embed_texts, embed_images, embed_clip_texts
 from data_upload.pinecone_services import query_vectors
+
+# 👇 import your highlighting function
+from scripts.highlighting import find_highlights
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
@@ -14,25 +17,31 @@ async def query_endpoint(
     req: QueryRequest,
     auth: AuthUser = Depends(get_current_user),
     settings = Depends(get_settings),
-    supabase = Depends(get_supabase),   # 👈 inject supabase client
+    supabase = Depends(get_supabase),
 ):
     if bool(req.query_text) == bool(req.image_b64):
-        raise HTTPException(422, detail="Provide exactly one of 'query_text' or 'image_b64'.")
+        raise HTTPException(
+            422,
+            detail="Provide exactly one of 'query_text' or 'image_b64'."
+        )
 
     user_id = auth.id
 
-    # Routing
+    # --- Routing ---
     if req.image_b64 is not None:
         chosen_route = "image"
     else:
         if req.route is None:
             chosen_route = "text"
         elif req.route not in ("text", "image"):
-            raise HTTPException(422, detail="route must be 'text' or 'image' (or omitted).")
+            raise HTTPException(
+                422,
+                detail="route must be 'text' or 'image' (or omitted)."
+            )
         else:
             chosen_route = req.route
 
-    # Embeddings
+    # --- Embeddings ---
     if chosen_route == "text":
         vec = (await embed_texts([req.query_text]))[0]
         modality_arg = "text"
@@ -50,7 +59,7 @@ async def query_endpoint(
     else:
         raise HTTPException(500, detail="Internal routing error")
 
-    # Group filter
+    # --- Group filter ---
     meta_filter = None
     if req.group_id is not None:
         if req.group_id == "":
@@ -63,6 +72,7 @@ async def query_endpoint(
         else:
             meta_filter = {"group_id": {"$eq": req.group_id}}
 
+    # --- Pinecone query ---
     try:
         result = query_vectors(
             vector=vec,
@@ -75,6 +85,7 @@ async def query_endpoint(
     except Exception as e:
         raise HTTPException(500, detail=f"Pinecone query failed: {e}")
 
+    # --- Build matches with highlighting ---
     matches = []
     for m in getattr(result, "matches", []) or []:
         md = m["metadata"] if isinstance(m, dict) else getattr(m, "metadata", {}) or {}
@@ -91,7 +102,12 @@ async def query_endpoint(
             except Exception as e:
                 print(f"Signed URL creation failed: {e}")
 
+        # add signed_url to metadata
         md = md | {"signed_url": signed_url}
+
+        # 🔑 Add highlighting for text-based metadata
+        if "text" in md and req.query_text:
+            md["highlight_spans"] = find_highlights(md["text"], req.query_text)
 
         matches.append(
             QueryMatch(
@@ -101,4 +117,9 @@ async def query_endpoint(
             )
         )
 
-    return QueryResponse(matches=matches, top_k=req.top_k, route=chosen_route, namespace=user_id)
+    return QueryResponse(
+        matches=matches,
+        top_k=req.top_k,
+        route=chosen_route,
+        namespace=user_id
+    )
