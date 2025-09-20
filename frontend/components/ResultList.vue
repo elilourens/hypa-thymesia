@@ -46,9 +46,21 @@ function renderHighlightedText(
           Score: {{ (r.score * 100).toFixed(1) }}%
         </p>
 
+        <!-- File with link to original -->
         <p class="text-xs text-gray-500">
-          File: <strong>{{ getFileName(r.metadata?.storage_path) }}</strong>
+          File: 
+          <strong>{{ getFileName(r.metadata?.storage_path) }}</strong>
+          <a
+            v-if="r.metadata?.signed_url"
+            :href="r.metadata.signed_url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-primary underline ml-1"
+          >
+            (open)
+          </a>
         </p>
+
         <USeparator
           orientation="horizontal"
           class="h-auto self-stretch"

@@ -1,4 +1,4 @@
-import os, base64
+import os
 from uuid import uuid4
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List, Optional
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 @router.post("/upload-text-and-images")
 async def ingest_text_and_image_files(
     file: UploadFile = File(...),
-    group_id: Optional[str] = Form(None),  # NEW: optional assignment
+    group_id: Optional[str] = Form(None),
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
     settings = Depends(get_settings),
@@ -32,10 +32,12 @@ async def ingest_text_and_image_files(
     if ext not in supported_text + supported_images:
         raise HTTPException(400, detail=f"Unsupported file type: {ext or 'unknown'}")
 
+    # --- Handle images ---
     if ext in supported_images:
         storage_path = upload_image_to_bucket(content, file.filename)
         if not storage_path:
             raise HTTPException(500, detail="Failed to upload image to storage")
+
         image_vectors = await embed_images([content])
         result = ingest_single_image(
             user_id=user_id,
@@ -50,11 +52,16 @@ async def ingest_text_and_image_files(
             doc_id=str(uuid4()),
             embedding_version=1,
             size_bytes=len(content),
-            group_id=group_id,  # NEW
+            group_id=group_id,
         )
         return {"doc_id": result["doc_id"], "chunks_ingested": result["vector_count"]}
 
-    storage_path = upload_text_to_bucket(content, file.filename)
+    # --- Handle text/PDF/docx ---
+    storage_path = upload_text_to_bucket(
+        content,
+        file.filename,
+        mime_type=file.content_type,   # 👈 pass correct MIME
+    )
     if not storage_path:
         raise HTTPException(500, detail="Failed to upload text to storage")
 
@@ -88,7 +95,7 @@ async def ingest_text_and_image_files(
         filename=file.filename,
         storage_path=storage_path,
         text_chunks=texts,
-        mime_type=file.content_type or "text/plain",
+        mime_type=file.content_type or "application/octet-stream",  # 👈 keep real MIME
         embedding_model="all-MiniLM-L12-v2",
         embedding_dim=384,
         embed_text_vectors=text_vectors,
@@ -97,6 +104,6 @@ async def ingest_text_and_image_files(
         embedding_version=1,
         extra_vector_metadata=extra_metas,
         size_bytes=len(content),
-        group_id=group_id,  # NEW
+        group_id=group_id,
     )
     return {"doc_id": result["doc_id"], "chunks_ingested": result["vector_count"]}

@@ -20,12 +20,25 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TEXT_BUCKET = os.getenv("TEXT_BUCKET", "texts")
 
 
-def upload_text_to_bucket(file_content: bytes, filename: str, bucket: str = TEXT_BUCKET) -> Optional[str]:
+def upload_text_to_bucket(
+    file_content: bytes,
+    filename: str,
+    bucket: str = TEXT_BUCKET,
+    mime_type: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Upload a text/PDF/docx file to Supabase with correct MIME type.
+    """
     ext = os.path.splitext(filename)[1].lower()
     if ext not in [".txt", ".md", ".rtf", ".pdf", ".docx"]:
         return None
+
     file_path = f"uploads/{uuid4()}_{filename}"
-    resp = supabase.storage.from_(bucket).upload(file_path, file_content)
+    resp = supabase.storage.from_(bucket).upload(
+        file_path,
+        file_content,
+        {"content-type": mime_type or "application/octet-stream"},
+    )
     return file_path if resp else None
 
 
@@ -103,7 +116,7 @@ def ingest_text_chunks(
     embedding_version: int = 1,
     extra_vector_metadata: Optional[List[Dict[str, Any]]] = None,
     size_bytes: int | None = None,
-    group_id: Optional[str] = None,  # NEW: optional group assignment
+    group_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     if len(text_chunks) != len(embed_text_vectors):
         raise ValueError("Number of text chunks must equal number of embeddings")
@@ -111,7 +124,6 @@ def ingest_text_chunks(
     if extra_vector_metadata is not None and len(extra_vector_metadata) != len(text_chunks):
         raise ValueError("extra_vector_metadata length must match number of text chunks")
 
-    # Optional early guard: all-MiniLM-L12-v2 is 384-D
     if embedding_dim and embedding_dim != 384:
         raise ValueError(f"Embedding dim mismatch for text: got {embedding_dim}, expected 384.")
 

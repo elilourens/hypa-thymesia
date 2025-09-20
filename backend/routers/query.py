@@ -93,7 +93,7 @@ async def query_endpoint(
         storage_path = md.get("storage_path")
 
         signed_url = None
-        if bucket and storage_path and md.get("modality") == "image":
+        if bucket and storage_path:
             try:
                 res = supabase.storage.from_(bucket).create_signed_url(
                     storage_path, expires_in=3600
