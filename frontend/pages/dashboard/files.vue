@@ -120,6 +120,20 @@ function stripLeadingUuid(name: string) {
   return name.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, '')
 }
 
+function prettyMime(mime?: string): string {
+  if (!mime) return '—'
+  if (mime.includes('pdf')) return 'PDF'
+  if (mime.includes('wordprocessingml')) return 'Word Doc'
+  if (mime.includes('spreadsheetml')) return 'Excel Sheet'
+  if (mime.includes('presentationml')) return 'PowerPoint'
+  if (mime === 'image/png') return 'PNG Image'
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'JPEG Image'
+  if (mime === 'text/plain') return 'Text File'
+  if (mime.startsWith('image/')) return 'Image'
+  if (mime.startsWith('text/')) return 'Text'
+  return mime
+}
+
 const columns: TableColumn<FileItem>[] = [
   {
     id: 'select',
@@ -146,7 +160,7 @@ const columns: TableColumn<FileItem>[] = [
     cell: ({ row }) =>
       h('div', { class: 'truncate' }, [
         h('div', { class: 'font-medium truncate', title: row.original.filename }, stripLeadingUuid(row.original.filename)),
-        h('div', { class: 'text-xs text-muted truncate' }, row.original.mime_type || '—'),
+        h('div', { class: 'text-xs text-muted truncate' }, prettyMime(row.original.mime_type)),
       ]),
   },
   {
@@ -154,7 +168,12 @@ const columns: TableColumn<FileItem>[] = [
     header: 'Modality',
     cell: ({ row }) => h(UBadge, { variant: 'subtle' }, () => row.original.modality || '—'),
   },
-  { accessorKey: 'mime_type', header: 'MIME' },
+  {
+    accessorKey: 'mime_type',
+    header: 'Type',
+    cell: ({ row }) =>
+      h(UBadge, { variant: 'subtle', color: 'primary' }, () => prettyMime(row.original.mime_type)),
+  },
   {
     accessorKey: 'size_bytes',
     header: sortHeader('Size', 'size_bytes'),
@@ -236,15 +255,13 @@ function getRowId(row: FileItem) { return row.doc_id }
 </script>
 
 <template>
+  <!-- Search & Tools -->
   <BodyCard>
-    <div class="flex-1 w-full">
-      <!-- Top row: search + filter -->
-      <div>
-        <h3>
-          Search:
-        </h3>
-      </div>
+    <h1 class="font-semibold text-lg mb-4">Stored Files</h1>
+    <div class="flex flex-col gap-4 w-full">
+      <!-- Search Row -->
       <div class="flex items-center gap-3 px-4 py-3.5 border-b border-accented overflow-x-auto">
+        
         <UInput
           v-model="filenameQuery"
           class="max-w-sm min-w-[16ch]"
@@ -267,8 +284,9 @@ function getRowId(row: FileItem) { return row.doc_id }
         </div>
       </div>
 
-      <!-- Second row: bulk actions -->
+      <!-- Bulk Actions -->
       <div class="flex items-center gap-20 px-4 py-2 border-b border-accented bg-muted/30">
+        
         <GroupSelect
           :model-value="null"
           placeholder="Move selected to group…"
@@ -287,44 +305,46 @@ function getRowId(row: FileItem) { return row.doc_id }
           Delete Selected
         </UButton>
       </div>
+    </div>
+  </BodyCard>
 
-      <!-- Table -->
-      <UTable
-        ref="table"
-        :data="data"
-        :columns="columns"
-        :loading="pending"
-        sticky
-        empty="No files found."
-        :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
-        :pagination="pagination"
-        :sorting="sorting"
-        :getRowId="getRowId"
-        class="flex-1"
-      >
-        <template #loading><div class="py-6 text-sm">Fetching files…</div></template>
-        <template #empty><div class="py-6 text-sm">Nothing to show.</div></template>
-      </UTable>
+  <!-- Files Table -->
+  <BodyCard>
+    <UTable
+      ref="table"
+      :data="data"
+      :columns="columns"
+      :loading="pending"
+      sticky
+      empty="No files found."
+      :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
+      :pagination="pagination"
+      :sorting="sorting"
+      :getRowId="getRowId"
+      class="flex-1"
+    >
+      <template #loading><div class="py-6 text-sm">Fetching files…</div></template>
+      <template #empty><div class="py-6 text-sm">Nothing to show.</div></template>
+    </UTable>
 
-      <!-- Footer -->
-      <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
-        <div>Page {{ pagination.pageIndex + 1 }} • Showing {{ data.length }} / {{ total.toLocaleString() }}</div>
-        <UPagination
-          :default-page="pagination.pageIndex + 1"
-          :items-per-page="pagination.pageSize"
-          :total="total"
-          @update:page="(p: number) => (pagination.pageIndex = p - 1)"
-        />
-      </div>
-
-      <UAlert
-        v-if="error"
-        icon="i-heroicons-exclamation-triangle"
-        color="error"
-        :title="error"
-        variant="subtle"
-        class="mx-4 mb-4"
+    <!-- Footer -->
+    <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
+      <div>Page {{ pagination.pageIndex + 1 }} • Showing {{ data.length }} / {{ total.toLocaleString() }}</div>
+      <UPagination
+        :default-page="pagination.pageIndex + 1"
+        :items-per-page="pagination.pageSize"
+        :total="total"
+        @update:page="(p: number) => (pagination.pageIndex = p - 1)"
       />
     </div>
+
+    <UAlert
+      v-if="error"
+      icon="i-heroicons-exclamation-triangle"
+      color="error"
+      :title="error"
+      variant="subtle"
+      class="mx-4 mb-4"
+    />
   </BodyCard>
 </template>
