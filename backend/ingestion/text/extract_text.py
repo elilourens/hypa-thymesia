@@ -33,12 +33,14 @@ def _base_name_no_ext(path: str) -> str:
 
 
 def _page_number_from_metadata(md: Dict[str, Any]) -> int | None:
-    # PyMuPDFLoader sets {"page": int} (1-based). Others may not have page info.
     page = md.get("page")
     try:
-        return int(page) if page is not None else None
+        if page is not None:
+            return int(page) + 1  # convert from 0-based → 1-based
+        return None
     except Exception:
         return None
+
 
 
 def _split_with_offsets(

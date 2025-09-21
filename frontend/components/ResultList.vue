@@ -19,7 +19,7 @@ function renderHighlightedText(
   let last = 0
   for (const s of [...spans].sort((a, b) => a.start - b.start)) {
     out += text.slice(last, s.start)
-    out += `<span class="bg-primary text-primary-foreground rounded px-0.5">${text.slice(
+    out += `<span class="bg-primary text-black rounded px-0.5">${text.slice(
       s.start,
       s.end
     )}</span>`
@@ -27,6 +27,25 @@ function renderHighlightedText(
   }
   out += text.slice(last)
   return out
+}
+
+// Deep link helper
+function getDeepLink(r: any) {
+  const url = r.metadata?.signed_url
+  const mime = r.metadata?.mime_type || ''
+  if (!url) return ''
+
+  // PDF deep link with page number
+  if (mime.includes('application/pdf') && r.metadata?.page_number) {
+    return `${url}#page=${r.metadata.page_number}`
+  }
+
+  // DOCX via Office viewer
+  if (mime.includes('officedocument.wordprocessingml.document')) {
+    return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}`
+  }
+
+  return url
 }
 </script>
 
@@ -53,12 +72,10 @@ function renderHighlightedText(
           </span>
 
           <div class="flex items-center gap-2">
-            <!-- Open button (all files) -->
+            <!-- Open button -->
             <UButton
               v-if="r.metadata?.signed_url"
-              :to="(r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document')
-                ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(r.metadata.signed_url)}`
-                : r.metadata.signed_url"
+              :to="getDeepLink(r)"
               target="_blank"
               rel="noopener noreferrer"
               size="xs"
@@ -113,7 +130,7 @@ function renderHighlightedText(
         <div v-else-if="(r.metadata?.mime_type || '').includes('application/pdf')">
           <iframe
             v-if="r.metadata?.signed_url"
-            :src="r.metadata.signed_url"
+            :src="getDeepLink(r)"
             width="100%"
             height="400"
             style="border: none;"
