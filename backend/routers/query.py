@@ -7,17 +7,19 @@ from schemas.ingest import QueryRequest, QueryResponse, QueryMatch
 from embed.embeddings import embed_texts, embed_images, embed_clip_texts
 from data_upload.pinecone_services import query_vectors
 
-# 👇 import your highlighting function
+# 👇 imports
 from scripts.highlighting import find_highlights
+from scripts.bm25_reranker import rerank_with_bm25
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
+
 
 @router.post("/query", response_model=QueryResponse)
 async def query_endpoint(
     req: QueryRequest,
     auth: AuthUser = Depends(get_current_user),
-    settings = Depends(get_settings),
-    supabase = Depends(get_supabase),
+    settings=Depends(get_settings),
+    supabase=Depends(get_supabase),
 ):
     if bool(req.query_text) == bool(req.image_b64):
         raise HTTPException(
@@ -116,6 +118,10 @@ async def query_endpoint(
                 metadata=md,
             )
         )
+
+    # --- BM25 re-ranking (text only) ---
+    if req.query_text:
+        matches = rerank_with_bm25(req.query_text, matches, req.bm25_weight)
 
     return QueryResponse(
         matches=matches,

@@ -21,7 +21,7 @@ const active = computed<string>({
     const seg = route.path.startsWith('/dashboard/')
       ? route.path.split('/')[2] || 'query'
       : 'query'
-    return ['query','upload','files','ai','groups'].includes(seg) ? seg : 'query'
+    return ['query','upload','files','ai','groups','settings'].includes(seg) ? seg : 'query'
   },
   set(val) {
     if (val !== active.value) router.push(`/dashboard/${val}`)
