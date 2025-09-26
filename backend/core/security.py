@@ -8,17 +8,21 @@ from .config import get_settings
 security = HTTPBearer()
 
 class AuthUser:
-    def __init__(self, sub: str, email: Optional[str] = None):
+    def __init__(self, sub: str, email: Optional[str] = None, token: Optional[str] = None):
         self.id = sub
         self.email = email
+        self.token = token          # ✅ store raw JWT so we can forward it
 
 _jwks_client = None
 
 def _get_jwks():
+    """Fetch JWK set once and reuse it."""
     global _jwks_client
     if _jwks_client is None:
         settings = get_settings()
-        _jwks_client = PyJWKClient(f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json")
+        _jwks_client = PyJWKClient(
+            f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+        )
     return _jwks_client
 
 def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)) -> AuthUser:
@@ -34,4 +38,10 @@ def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)) -> 
         )
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid or expired token: {e}")
-    return AuthUser(sub=payload["sub"], email=payload.get("email"))
+
+    # ✅ Include token so downstream (like the retriever) can use it
+    return AuthUser(
+        sub=payload["sub"],
+        email=payload.get("email"),
+        token=token
+    )
