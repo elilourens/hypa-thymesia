@@ -214,6 +214,7 @@ def answer_with_context(state: GraphState):
 
 Use the provided context below ONLY when it is relevant.
 If no relevant context is available, say: "No relevant documents found."
+When talking about files or documents be clear about if you are talking about user uploaded files or documents which is the title in the returned context or sub files: files found within the parent file.
 
 Context:
 {docs}

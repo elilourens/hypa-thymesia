@@ -4,7 +4,7 @@
       <!-- Left side -->
       <div class="flex items-center gap-2">
         
-        <h1 class="text-lg font-bold">Mind Palace</h1>
+        <h1 class="text-lg font-bold">Hypa-Thymesia</h1>
       </div>
 
       <!-- Right side -->

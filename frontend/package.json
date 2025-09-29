@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@nuxtjs/supabase": "^1.6.0",
-    "nuxt": "^4.0.3",
+    "nuxt": "^4.1.2",
     "tailwindcss": "^4.1.12",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1"
@@ -19,6 +19,6 @@
   "devDependencies": {
     "@nuxt/eslint": "^1.8.0",
     "@nuxt/icon": "^2.0.0",
-    "@nuxt/ui": "^3.3.2"
+    "@nuxt/ui": "^4.0.0"
   }
 }
