@@ -1,6 +1,6 @@
 <template>
   <div class="border-b border-white">
-    <div class="flex justify-between items-center mx-[5%] py-2">
+    <div class="flex justify-between items-center mx-[20%] py-2">
       <!-- Left side -->
       <div class="flex items-center gap-2">
         
@@ -13,10 +13,10 @@
           <!-- Only shows if NOT on /dashboard -->
           <UButton icon="i-lucide-rocket" size="md" color="primary" variant="solid">Sign Up</UButton>
         </div>
-        <a>Contact Us</a>
-        <a>Use Cases</a>
-        <a>Demo</a>
-        <a>Pricing</a>
+        <UButton size="md" color="neutral" variant="ghost">Contact us</UButton>
+        <UButton size="md" color="neutral" variant="ghost">Use Cases</UButton>
+        <UButton size="md" color="neutral" variant="ghost">Demo</UButton>
+        <UButton size="md" color="neutral" variant="ghost">Pricing</UButton>
       </div>
     </div>
   </div>
