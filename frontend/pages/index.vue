@@ -77,14 +77,6 @@ const fakeDataSets: FakeResult[][] = [
       fileName: 'turbo-history.pdf',
       type: 'text',
       text: "The Porsche 911 Turbo lineage began in 1975 with the legendary 930, notable for its dramatic turbo lag and iconic wide rear fenders. Over decades the Turbo evolved into a sophisticated high-performance machine, now using a 3.8-liter twin-turbo flat-six producing up to 640 hp in the current Turbo S. Porsche refined turbocharging to deliver seamless power and instant torque while retaining everyday usability. Modern Turbos include advanced all-wheel drive, variable-geometry turbos, and active aerodynamics such as a two-stage rear wing and adaptive front splitter. With a 0-60 mph time as low as 2.6 s and a top speed exceeding 200 mph, the 911 Turbo combines supercar acceleration with grand-touring comfort and remains a benchmark for performance coupes worldwide."
-    },
-    {
-      id: 3,
-      score: 0.86,
-      title: 'Porsche 911 GT3 Track Highlights',
-      fileName: 'gt3-track.pdf',
-      type: 'text',
-      text: "The 911 GT3 represents the naturally aspirated, motorsport-bred side of Porsche’s flagship sports car. Powered by a 4.0-liter flat-six derived from Porsche’s Cup racing engines, it revs to 9,000 rpm and produces about 502 hp with razor-sharp throttle response. The GT3 features double-wishbone front suspension for improved turn-in, extensive use of carbon-fiber-reinforced plastics, and a swan-neck rear wing that boosts downforce without excessive drag. Offered with either a six-speed manual or a PDK dual-clutch gearbox, the GT3 sprints from 0-60 mph in around 3.2 s and exceeds 197 mph on the straight. Track-focused Michelin Pilot Sport Cup 2 tires, Porsche Ceramic Composite Brakes, and finely tuned aerodynamics make it one of the most engaging street-legal track cars available."
     }
   ],
   [
@@ -95,16 +87,32 @@ const fakeDataSets: FakeResult[][] = [
       fileName: 'cute.jpg',
       type: 'image',
       src: '/cute.jpg'
+    },
+    {
+      id: 2,
+      score: 0.93,
+      title: '',
+      fileName: 'kitty.jpg',
+      type: 'image',
+      src: '/kitty.jpg'
     }
   ],
   [
     {
       id: 1,
       score: 0.81,
-      title: '',
+      title: 'LLM-Based Agentic Architectures',
       fileName: 'workdoc.pdf',
       type: 'text',
-      text: 'Notes on LLM-based agentic architectures...'
+      text: `Agentic architectures leverage large language models (LLMs) as the core reasoning and planning component within a broader system of tools, memory, and environment interaction. These agents are designed to autonomously decompose complex tasks, invoke external APIs, and maintain context over extended interactions. A typical LLM agent includes a planning module, a set of tool-use policies, and a memory or scratchpad for intermediate results. The agent receives a user goal, breaks it into actionable steps, and iteratively executes them, often using a loop of observation, planning, and action. Key challenges include managing context window limitations, ensuring reliable tool invocation, and handling ambiguous or underspecified instructions. Recent advances focus on integrating vector databases for long-term memory, using retrieval-augmented generation (RAG) to ground responses, and orchestrating multiple agents for collaborative problem-solving. Safety, interpretability, and robust error handling remain active areas of research in agentic LLM systems.`
+    },
+    {
+      id: 2,
+      score: 0.79,
+      title: 'Tool Use and Orchestration',
+      fileName: 'workdoc.pdf',
+      type: 'text',
+      text: `A defining feature of modern AI agents is their ability to use external tools—APIs, databases, web browsers, or code execution environments—to augment their capabilities beyond pure language modeling. Tool use is typically orchestrated through a decision-making loop, where the agent selects the most appropriate tool for a given subtask, formulates the input, and interprets the output. This process can be single-step (reactive) or multi-step (reflective), with the latter allowing for more sophisticated reasoning and error correction. Orchestration frameworks like LangChain, AutoGen, and CrewAI provide abstractions for defining tool schemas, agent roles, and communication protocols. Multi-agent systems can coordinate specialized agents (e.g., a researcher, coder, and critic) to tackle complex workflows. Effective orchestration requires robust state management, clear delegation of responsibilities, and mechanisms for conflict resolution or consensus-building among agents. As tool ecosystems grow, dynamic tool discovery and self-improvement are emerging research frontiers.`
     }
   ]
 ]
@@ -288,29 +296,46 @@ onMounted(() => {
 /* --- Results Grid: horizontal layout --- */
 .results-grid {
   width: 100%;
+  max-width: 1000px;
+  margin-left: auto;
+  margin-right: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 1.2rem;
+  justify-items: stretch;
+  align-items: stretch;
 }
 
 /* Horizontal card layout */
 .results-grid .u-card {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: stretch;
   gap: 1rem;
-  padding: 1rem;
+  padding: 1.5rem 1.25rem;
   background: #1a1a1a;
   min-height: 220px;
   border-radius: 0.75rem;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Make image cards display image and content side by side on wide screens */
+.results-grid .u-card:has(img) {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 /* Image on the left, now larger */
 .results-grid img {
-  width: 60%;
-  height: 200px;
+  width: 100%;
+  height: 240px;
   object-fit: cover;
   border-radius: 0.5rem;
+  display: block;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 /* Content on the right */
