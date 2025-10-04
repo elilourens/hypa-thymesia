@@ -20,6 +20,8 @@ const phrases: string[] = [
   "find research notes on AI agents"
 ]
 
+
+
 const displayText = ref("")
 const typingSpeed = 80
 const pauseBetween = 7000
@@ -104,7 +106,7 @@ const fakeDataSets: FakeResult[][] = [
       title: 'LLM-Based Agentic Architectures',
       fileName: 'workdoc.pdf',
       type: 'text',
-      text: `Agentic architectures leverage large language models (LLMs) as the core reasoning and planning component within a broader system of tools, memory, and environment interaction. These agents are designed to autonomously decompose complex tasks, invoke external APIs, and maintain context over extended interactions. A typical LLM agent includes a planning module, a set of tool-use policies, and a memory or scratchpad for intermediate results. The agent receives a user goal, breaks it into actionable steps, and iteratively executes them, often using a loop of observation, planning, and action. Key challenges include managing context window limitations, ensuring reliable tool invocation, and handling ambiguous or underspecified instructions. Recent advances focus on integrating vector databases for long-term memory, using retrieval-augmented generation (RAG) to ground responses, and orchestrating multiple agents for collaborative problem-solving. Safety, interpretability, and robust error handling remain active areas of research in agentic LLM systems.`
+      text: `Agentic architectures leverage large language models (LLMs) as the core reasoning and planning component within a broader system of tools, memory, and environment interaction. These agents are designed to autonomously decompose complex tasks, invoke external APIs, and maintain context over extended interactions. A typical LLM agent includes a planning module, a set of tool-use policies, and a memory or scratchpad for intermediate results. The agent receives a user goal, breaks it into actionable steps, and iteratively executes them, often using a loop of observation, planning, and action. Key challenges include managing context window limitations, ensuring reliable tool invocation, and handling ambiguous or underspecified instructions. Recent advances focus on integrating vector databases for long-term memory, using retrieval-augmented generation (RAG) to ground responses, and orchestrating multiple agents for collaborative problem-solving.`
     },
     {
       id: 2,
@@ -112,14 +114,12 @@ const fakeDataSets: FakeResult[][] = [
       title: 'Tool Use and Orchestration',
       fileName: 'workdoc.pdf',
       type: 'text',
-      text: `A defining feature of modern AI agents is their ability to use external tools—APIs, databases, web browsers, or code execution environments—to augment their capabilities beyond pure language modeling. Tool use is typically orchestrated through a decision-making loop, where the agent selects the most appropriate tool for a given subtask, formulates the input, and interprets the output. This process can be single-step (reactive) or multi-step (reflective), with the latter allowing for more sophisticated reasoning and error correction. Orchestration frameworks like LangChain, AutoGen, and CrewAI provide abstractions for defining tool schemas, agent roles, and communication protocols. Multi-agent systems can coordinate specialized agents (e.g., a researcher, coder, and critic) to tackle complex workflows. Effective orchestration requires robust state management, clear delegation of responsibilities, and mechanisms for conflict resolution or consensus-building among agents. As tool ecosystems grow, dynamic tool discovery and self-improvement are emerging research frontiers.`
+      text: `A defining feature of modern AI agents is their ability to use external tools—APIs, databases, web browsers, or code execution environments—to augment their capabilities beyond pure language modeling. Tool use is typically orchestrated through a decision-making loop, where the agent selects the most appropriate tool for a given subtask, formulates the input, and interprets the output. This process can be single-step (reactive) or multi-step (reflective), with the latter allowing for more sophisticated reasoning and error correction. Orchestration frameworks like LangChain, AutoGen, and CrewAI provide abstractions for defining tool schemas, agent roles, and communication protocols. Multi-agent systems can coordinate specialized agents (e.g., a researcher, coder, and critic) to tackle complex workflows. Effective orchestration requires robust state management, clear delegation of responsibilities, and mechanisms for conflict resolution or consensus-building among agents.`
     }
   ]
 ]
 
-/* -----------------------------
-   Typing loop
---------------------------------*/
+
 onMounted(() => {
   let phraseIndex = 0
   let charIndex = 0
@@ -240,10 +240,60 @@ onMounted(() => {
         </div>
       </UCard>
     </div>
+
+    
   </div>
+  
+  <h1 class="supported-title">Supported File Types</h1>
+
+<BodyCard class="static-footer">
+  <UMarquee pause-on-hover :overlay="false" :ui="{ root: '[--gap:0.5rem]' }" :repeat="6">
+    <span class="file-type">TXT</span>
+    <span class="file-type">PDF</span>
+    <span class="file-type">DOCX</span>
+    <span class="file-type">JPEG</span>
+    <span class="file-type">PNG</span>
+  </UMarquee>
+</BodyCard>
+
 </template>
 
 <style scoped>
+
+.supported-title {
+  text-align: center;      /* centers text horizontally */
+  font-size: 3rem;         /* make it large */
+  font-weight: 700;        /* bold */
+  margin-bottom: 1rem;     /* space between title and card */
+  margin-top: 2rem;        /* space above the title */
+  color: white;            /* adjust to fit your theme */
+}
+
+.static-footer {
+  /* size of the card */
+          /* or max-width: 400px */
+  height: 80px;
+
+  
+
+  /* card styling */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #222;
+  color: white;
+  border-radius: 0.75rem;
+}
+
+
+.static-footer {
+  border-top: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 -2px 6px rgba(0,0,0,0.3);
+}
+
+
+
 .hero-bg {
   background: url('/indexbackground.jpg') no-repeat center bottom / cover;
   min-height: 70vh;

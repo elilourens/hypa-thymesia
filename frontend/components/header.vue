@@ -4,14 +4,22 @@
       <!-- Left side -->
       <div class="flex items-center gap-2">
         
-        <h1 class="text-lg font-bold">Hypa-Thymesia</h1>
+        <UButton
+          to="/"
+          variant="ghost"
+          color="neutral"
+          size="lg"
+          class="font-bold text-lg"
+        >
+          Hypa-Thymesia
+        </UButton>
       </div>
 
       <!-- Right side -->
       <div class="flex gap-6">
         <div v-if="!$route.path.startsWith('/dashboard')">
           <!-- Only shows if NOT on /dashboard -->
-          <UButton icon="i-lucide-rocket" size="md" color="primary" variant="solid">Sign Up</UButton>
+          <UButton to="/login" icon="i-lucide-rocket" size="md" color="primary" variant="solid">Sign Up</UButton>
         </div>
         <UButton size="md" color="neutral" variant="ghost">Contact us</UButton>
         <UButton size="md" color="neutral" variant="ghost">Use Cases</UButton>
