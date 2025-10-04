@@ -1,5 +1,4 @@
 # scripts/bm25_reranker.py
-
 from typing import List
 from schemas.ingest import QueryMatch
 
@@ -18,6 +17,8 @@ def rerank_with_bm25(
 ) -> List[QueryMatch]:
     """
     Re-rank Pinecone matches by blending embedding similarity with BM25 scores.
+    Only text-based matches are reranked. Non-text (e.g. images, PDFs) keep their
+    original Pinecone order and scores.
 
     Args:
         query_text (str): The query string provided by the user.
@@ -33,8 +34,16 @@ def rerank_with_bm25(
         return matches
 
     try:
+        # Split text vs non-text matches
+        text_matches = [m for m in matches if m.metadata.get("modality", "").lower() == "text"]
+        non_text_matches = [m for m in matches if m not in text_matches]
+
+        if not text_matches:
+            # Nothing to rerank → return original order
+            return matches
+
         query_tokens = word_tokenize(query_text.lower())
-        corpus = [word_tokenize(m.metadata.get("text", "").lower()) for m in matches]
+        corpus = [word_tokenize(m.metadata.get("text", "").lower()) for m in text_matches]
 
         bm25 = BM25Okapi(corpus)
         bm25_scores = bm25.get_scores(query_tokens)
@@ -43,8 +52,8 @@ def rerank_with_bm25(
         if bm25_scores.max() > 0:
             bm25_scores = bm25_scores / bm25_scores.max()
 
-        # Blend scores
-        for i, m in enumerate(matches):
+        # Blend scores for text matches only
+        for i, m in enumerate(text_matches):
             dense_score = m.score or 0.0
             bm25_score = float(bm25_scores[i])
             blended = (1 - bm25_weight) * dense_score + bm25_weight * bm25_score
@@ -57,8 +66,12 @@ def rerank_with_bm25(
                 f"Text={m.metadata.get('text', '')[:50]}"
             )
             """
-        # Sort by blended score
-        matches.sort(key=lambda x: x.score, reverse=True)
+
+        # Sort text matches by blended score
+        text_matches.sort(key=lambda x: x.score, reverse=True)
+
+        # Recombine: text matches (reranked) first, followed by non-text in their original order
+        matches = text_matches + non_text_matches
 
     except Exception as e:
         print(f"[BM25] Failed to rerank: {e}")
