@@ -7,7 +7,7 @@ from schemas.ingest import QueryRequest, QueryResponse, QueryMatch
 from embed.embeddings import embed_texts, embed_images, embed_clip_texts
 from data_upload.pinecone_services import query_vectors
 
-# 👇 imports
+# extra utils
 from scripts.highlighting import find_highlights
 from scripts.bm25_reranker import rerank_with_bm25
 
@@ -19,7 +19,7 @@ async def query_endpoint(
     req: QueryRequest,
     auth: AuthUser = Depends(get_current_user),
     settings=Depends(get_settings),
-    supabase=Depends(get_supabase),
+    supabase=Depends(get_supabase),        # kept here if you need for other reasons
 ):
     if bool(req.query_text) == bool(req.image_b64):
         raise HTTPException(
@@ -91,21 +91,11 @@ async def query_endpoint(
     matches = []
     for m in getattr(result, "matches", []) or []:
         md = m["metadata"] if isinstance(m, dict) else getattr(m, "metadata", {}) or {}
+
+        # keep only bucket & path for later use by /storage/signed-url
         bucket = md.get("bucket")
         storage_path = md.get("storage_path")
-
-        signed_url = None
-        if bucket and storage_path:
-            try:
-                res = supabase.storage.from_(bucket).create_signed_url(
-                    storage_path, expires_in=3600
-                )
-                signed_url = res.get("signedURL")
-            except Exception as e:
-                print(f"Signed URL creation failed: {e}")
-
-        # add signed_url to metadata
-        md = md | {"signed_url": signed_url}
+        md = md | {"bucket": bucket, "storage_path": storage_path}
 
         # 🔑 Add highlighting for text-based metadata
         if "text" in md and req.query_text:
@@ -127,5 +117,5 @@ async def query_endpoint(
         matches=matches,
         top_k=req.top_k,
         route=chosen_route,
-        namespace=user_id
+        namespace=user_id,
     )

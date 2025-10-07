@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import { useFilesApi } from '~/composables/useFiles'       // ⬅️ import API
+const { getSignedUrl } = useFilesApi()                     // ⬅️ pull in helper
+const toast = useToast()
+
 const props = defineProps<{ results: any[], deleting?: boolean }>()
 
-// Helper to extract filename from storage_path
 function getFileName(path?: string) {
   if (!path) return '(unknown file)'
   return path.split('_').pop() || path
 }
 
-// Helper to render text with highlighted spans
 function renderHighlightedText(
   text?: string,
   spans?: { start: number; end: number; term: string }[]
@@ -29,23 +31,46 @@ function renderHighlightedText(
   return out
 }
 
-// Deep link helper
-function getDeepLink(r: any) {
-  const url = r.metadata?.signed_url
+// deep-link builder for PDFs & DOCX
+function buildDeepLink(baseUrl: string, r: any) {
   const mime = r.metadata?.mime_type || ''
-  if (!url) return ''
-
-  // PDF deep link with page number
   if (mime.includes('application/pdf') && r.metadata?.page_number) {
-    return `${url}#page=${r.metadata.page_number}`
+    return `${baseUrl}#page=${r.metadata.page_number}`
   }
-
-  // DOCX via Office viewer
   if (mime.includes('officedocument.wordprocessingml.document')) {
-    return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}`
+    return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(baseUrl)}`
   }
+  return baseUrl
+}
 
-  return url
+// Lazy open
+async function handleOpen(r: any) {
+  try {
+    const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
+    if (!url) throw new Error('No URL returned')
+    window.open(buildDeepLink(url, r), '_blank')
+  } catch (err: any) {
+    toast.add({
+      title: 'Could not open file',
+      description: err.message || 'Error generating signed URL',
+      color: 'error'
+    })
+  }
+}
+
+// Lazy download (for DOCX or generic)
+async function handleDownload(r: any) {
+  try {
+    const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
+    if (!url) throw new Error('No URL returned')
+    window.open(url, '_blank')
+  } catch (err: any) {
+    toast.add({
+      title: 'Download failed',
+      description: err.message || 'Error generating signed URL',
+      color: 'error'
+    })
+  }
 }
 </script>
 
@@ -60,7 +85,6 @@ function getDeepLink(r: any) {
       class="flex flex-col justify-between"
     >
       <div class="flex-1 space-y-2">
-        <!-- Score as percentage -->
         <p class="text-xs text-gray-500">
           Score: {{ (r.score * 100).toFixed(1) }}%
         </p>
@@ -72,41 +96,30 @@ function getDeepLink(r: any) {
           </span>
 
           <div class="flex items-center gap-2">
-            <!-- Open button -->
             <UButton
-              v-if="r.metadata?.signed_url"
-              :to="getDeepLink(r)"
-              target="_blank"
-              rel="noopener noreferrer"
               size="xs"
               color="primary"
               variant="soft"
               icon="i-heroicons-eye"
+              @click="handleOpen(r)"
             >
               Open
             </UButton>
 
-            <!-- Download button (DOCX only) -->
             <UButton
-              v-if="r.metadata?.signed_url && (r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document')"
-              :to="r.metadata.signed_url"
-              target="_blank"
-              rel="noopener noreferrer"
+              v-if="(r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document')"
               size="xs"
               color="primary"
               variant="soft"
               icon="i-heroicons-arrow-down-tray"
+              @click="handleDownload(r)"
             >
               Download
             </UButton>
           </div>
         </div>
 
-        <USeparator
-          orientation="horizontal"
-          class="h-auto self-stretch"
-          size="lg"
-        />
+        <USeparator orientation="horizontal" class="h-auto self-stretch" size="lg" />
 
         <!-- Render text hits -->
         <p v-if="(r.metadata?.modality || '').toLowerCase() === 'text'">
@@ -126,18 +139,18 @@ function getDeepLink(r: any) {
           <p v-else>{{ r.metadata?.title || '(image)' }}</p>
         </div>
 
-        <!-- Render PDF inline -->
+        <!-- Inline PDF preview (kept if already signed_url from backend) -->
         <div v-else-if="(r.metadata?.mime_type || '').includes('application/pdf')">
           <iframe
             v-if="r.metadata?.signed_url"
-            :src="getDeepLink(r)"
+            :src="buildDeepLink(r.metadata.signed_url, r)"
             width="100%"
             height="400"
             style="border: none;"
           ></iframe>
         </div>
 
-        <!-- Render DOCX inline via Office viewer -->
+        <!-- Inline DOCX preview -->
         <div v-else-if="(r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document')">
           <iframe
             v-if="r.metadata?.signed_url"

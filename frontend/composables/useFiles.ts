@@ -96,5 +96,21 @@ export function useFilesApi() {
     }
   }
 
-  return { listFiles }
+  /**
+   * Lazily fetch a signed URL for one file.
+   */
+  async function getSignedUrl(bucket: string, path: string): Promise<string> {
+    const headers = await authHeaders()
+    try {
+      const res = await $fetch<{ signed_url: string }>(
+        `${API_BASE}/storage/signed-url`,
+        { method: 'GET', headers, params: { bucket, path } }
+      )
+      return res.signed_url
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Failed to get signed URL')
+    }
+  }
+
+  return { listFiles, getSignedUrl }
 }

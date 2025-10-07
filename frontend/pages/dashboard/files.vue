@@ -26,7 +26,9 @@ const UPopover = resolveComponent('UPopover')
 const UCalendar = resolveComponent('UCalendar')
 
 const table = useTemplateRef('table')
-const { listFiles } = useFilesApi()
+
+// ⬇️ include getSignedUrl
+const { listFiles, getSignedUrl } = useFilesApi()
 const { setDocGroup } = useGroupsApi()
 const { deleteDoc } = useIngest()
 const toast = useToast()
@@ -207,6 +209,30 @@ const columns: TableColumn<FileItem>[] = [
       row.original.group_name
         ? h('span', { class: 'inline-flex items-center gap-1' }, [h(UIcon, { name: 'i-heroicons-folder' }), row.original.group_name])
         : '—'
+  },
+  // NEW Actions column
+  {
+    id: 'actions',
+    header: 'Actions',
+    cell: ({ row }) =>
+      h(UButton, {
+        size: 'xs',
+        color: 'primary',
+        variant: 'soft',
+        icon: 'i-heroicons-eye',
+        onClick: async () => {
+          try {
+            const url = await getSignedUrl(row.original.bucket, row.original.storage_path)
+            if (url) window.open(url, '_blank')
+          } catch (err: any) {
+            toast.add({
+              title: 'Could not open file',
+              description: err.message || 'Error generating signed URL',
+              color: 'error'
+            })
+          }
+        }
+      }, 'Open')
   }
 ]
 
@@ -244,8 +270,8 @@ const fetchFiles = async () => {
       modality: selectedModality.value,
       created_from,
       created_to,
-      min_size: minSize.value ? minSize.value * 1024 * 1024 : null, // MB → bytes
-      max_size: maxSize.value ? maxSize.value * 1024 * 1024 : null, // MB → bytes
+      min_size: minSize.value ? minSize.value * 1024 * 1024 : null,
+      max_size: maxSize.value ? maxSize.value * 1024 * 1024 : null,
       group_id: selectedGroupId.value === NO_GROUP_VALUE ? '' : selectedGroupId.value || null,
       sort: mapSortField(activeSort.id),
       dir: mapSortDir(activeSort.desc),
@@ -432,4 +458,3 @@ function getRowId(row: FileItem) { return row.doc_id }
     />
   </BodyCard>
 </template>
-
