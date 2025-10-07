@@ -1,7 +1,12 @@
 // composables/useFiles.ts
+import { useSupabaseClient } from '#imports'
+
 export type SortField = 'created_at' | 'size' | 'name'
 export type SortDir = 'asc' | 'desc'
 export type GroupSort = 'none' | 'group_then_time'
+
+// 👉 Extend this union if you want more modalities.
+export type Modality = 'text' | 'image' | 'audio' | 'video'
 
 export interface FileItem {
   doc_id: string
@@ -10,7 +15,7 @@ export interface FileItem {
   bucket: string
   storage_path: string
   mime_type: string
-  modality: string
+  modality: Modality | null
   size_bytes?: number | null
   chunk_count: number
   created_at: string
@@ -43,9 +48,12 @@ export function useFilesApi() {
     return { Authorization: `Bearer ${t}` }
   }
 
+  /**
+   * Fetch paginated files with filters
+   */
   async function listFiles(params: {
     q?: string | null
-    modality?: 'text' | 'image' | null
+    modality?: Modality | null
     created_from?: string | null
     created_to?: string | null
     min_size?: number | null
@@ -55,7 +63,7 @@ export function useFilesApi() {
     page?: number
     page_size?: number
     recent?: boolean | null
-    group_id?: string | null
+    group_id?: string | null        // can be '' for “no group”
     group_sort?: GroupSort
   }): Promise<FilesResponse> {
     const headers = await authHeaders()
@@ -64,7 +72,7 @@ export function useFilesApi() {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== undefined && v !== null) {
         if (k === 'group_id') {
-          // ⚡ special case: allow empty string so backend can interpret as "no group"
+          // ⚡ allow empty string so backend can interpret as “no group”
           sp.set(k, v as string)
         } else if (v !== '') {
           sp.set(k, String(v))
@@ -81,10 +89,7 @@ export function useFilesApi() {
     try {
       return await $fetch<FilesResponse>(
         `${API_BASE}/files?${sp.toString()}`,
-        {
-          method: 'GET',
-          headers,
-        }
+        { method: 'GET', headers }
       )
     } catch (err: any) {
       throw new Error(err?.data || err?.message || 'Failed to load files')

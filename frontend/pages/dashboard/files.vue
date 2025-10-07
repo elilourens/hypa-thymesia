@@ -8,17 +8,22 @@ import {
   type FileItem,
   type SortField,
   type SortDir,
+  type Modality
 } from '~/composables/useFiles'
 import { useGroupsApi, NO_GROUP_VALUE } from '@/composables/useGroups'
 import { useIngest } from '@/composables/useIngest'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
+import { CalendarDate, getLocalTimeZone } from '@internationalized/date'
 
 const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
 const UCheckbox = resolveComponent('UCheckbox')
 const UIcon = resolveComponent('UIcon')
 const UInput = resolveComponent('UInput')
+const UInputMenu = resolveComponent('UInputMenu')
+const UPopover = resolveComponent('UPopover')
+const UCalendar = resolveComponent('UCalendar')
 
 const table = useTemplateRef('table')
 const { listFiles } = useFilesApi()
@@ -33,6 +38,17 @@ const sorting = ref<SortingState>([{ id: 'created_at', desc: true }])
 const pagination = reactive({ pageIndex: 0, pageSize: 20 })
 const filenameQuery = ref('')
 const selectedGroupId = ref<string | null>(null)
+
+/** ---------- Filters ---------- **/
+const selectedModality = ref<Modality | null>(null)
+const minSize = ref<number | null>(null) // in MB
+const maxSize = ref<number | null>(null) // in MB
+
+// Date range
+const dateRange = ref<{ start: CalendarDate | null; end: CalendarDate | null }>({
+  start: null,
+  end: null
+})
 
 /** ---------- Bulk selection helpers ---------- **/
 function selectedRowIds(): string[] {
@@ -88,7 +104,7 @@ async function bulkChangeGroup(value: string | null) {
     toast.add({
       title: gid ? `Moved ${ids.length} file(s) to group` : `Cleared group for ${ids.length} file(s)`,
       color: 'success',
-      icon: 'i-lucide-check',
+      icon: 'i-lucide-check'
     })
   } catch (e: any) {
     toast.add({ title: e?.message ?? 'Failed to change group', color: 'error', icon: 'i-lucide-alert-triangle' })
@@ -111,7 +127,7 @@ function sortHeader(label: string, columnId: string) {
             : 'i-lucide-arrow-down-wide-narrow')
         : 'i-lucide-arrow-up-down',
       class: '-mx-2.5',
-      onClick: () => column.toggleSorting(isSorted === 'asc'),
+      onClick: () => column.toggleSorting(isSorted === 'asc')
     })
   }
 }
@@ -143,16 +159,16 @@ const columns: TableColumn<FileItem>[] = [
           ? 'indeterminate'
           : table.getIsAllPageRowsSelected(),
         'onUpdate:modelValue': (v: boolean | 'indeterminate') => table.toggleAllPageRowsSelected(!!v),
-        'aria-label': 'Select all',
+        'aria-label': 'Select all'
       }),
     cell: ({ row }) =>
       h(UCheckbox, {
         modelValue: row.getIsSelected(),
         'onUpdate:modelValue': (v: boolean | 'indeterminate') => row.toggleSelected(!!v),
-        'aria-label': 'Select row',
+        'aria-label': 'Select row'
       }),
     enableSorting: false,
-    enableHiding: false,
+    enableHiding: false
   },
   {
     accessorKey: 'filename',
@@ -160,29 +176,29 @@ const columns: TableColumn<FileItem>[] = [
     cell: ({ row }) =>
       h('div', { class: 'truncate' }, [
         h('div', { class: 'font-medium truncate', title: row.original.filename }, stripLeadingUuid(row.original.filename)),
-        h('div', { class: 'text-xs text-muted truncate' }, prettyMime(row.original.mime_type)),
-      ]),
+        h('div', { class: 'text-xs text-muted truncate' }, prettyMime(row.original.mime_type))
+      ])
   },
   {
     accessorKey: 'modality',
     header: 'Modality',
-    cell: ({ row }) => h(UBadge, { variant: 'subtle' }, () => row.original.modality || '—'),
+    cell: ({ row }) => h(UBadge, { variant: 'subtle' }, () => row.original.modality || '—')
   },
   {
     accessorKey: 'mime_type',
     header: 'Type',
     cell: ({ row }) =>
-      h(UBadge, { variant: 'subtle', color: 'primary' }, () => prettyMime(row.original.mime_type)),
+      h(UBadge, { variant: 'subtle', color: 'primary' }, () => prettyMime(row.original.mime_type))
   },
   {
     accessorKey: 'size_bytes',
     header: sortHeader('Size', 'size_bytes'),
-    cell: ({ row }) => formatSize(row.original.size_bytes),
+    cell: ({ row }) => formatSize(row.original.size_bytes)
   },
   {
     accessorKey: 'created_at',
     header: sortHeader('Created', 'created_at'),
-    cell: ({ row }) => h('span', { title: row.original.created_at }, formatDate(row.original.created_at)),
+    cell: ({ row }) => h('span', { title: row.original.created_at }, formatDate(row.original.created_at))
   },
   {
     accessorKey: 'group_name',
@@ -190,8 +206,8 @@ const columns: TableColumn<FileItem>[] = [
     cell: ({ row }) =>
       row.original.group_name
         ? h('span', { class: 'inline-flex items-center gap-1' }, [h(UIcon, { name: 'i-heroicons-folder' }), row.original.group_name])
-        : '—',
-  },
+        : '—'
+  }
 ]
 
 /** ---------- Fetch (server-side) ---------- **/
@@ -215,14 +231,27 @@ const fetchFiles = async () => {
   error.value = null
   try {
     const activeSort = sorting.value[0] || { id: 'created_at', desc: true }
+
+    const created_from = dateRange.value.start
+      ? dateRange.value.start.toDate(getLocalTimeZone()).toISOString()
+      : null
+    const created_to = dateRange.value.end
+      ? dateRange.value.end.toDate(getLocalTimeZone()).toISOString()
+      : null
+
     const res = await listFiles({
       q: filenameQuery.value || null,
+      modality: selectedModality.value,
+      created_from,
+      created_to,
+      min_size: minSize.value ? minSize.value * 1024 * 1024 : null, // MB → bytes
+      max_size: maxSize.value ? maxSize.value * 1024 * 1024 : null, // MB → bytes
       group_id: selectedGroupId.value === NO_GROUP_VALUE ? '' : selectedGroupId.value || null,
       sort: mapSortField(activeSort.id),
       dir: mapSortDir(activeSort.desc),
       page: pagination.pageIndex + 1,
       page_size: pagination.pageSize,
-      group_sort: 'none',
+      group_sort: 'none'
     })
     data.value = res.items
     total.value = res.total
@@ -235,8 +264,11 @@ const fetchFiles = async () => {
 
 const debouncedFetch = useDebounceFn(fetchFiles, 150)
 watch([sorting, () => pagination.pageIndex, () => pagination.pageSize], () => debouncedFetch(), { deep: true })
-watch(filenameQuery, () => { pagination.pageIndex = 0; debouncedFetch() })
-watch(selectedGroupId, () => { pagination.pageIndex = 0; debouncedFetch() })
+watch([filenameQuery, selectedGroupId, dateRange, minSize, maxSize, selectedModality], () => {
+  pagination.pageIndex = 0
+  debouncedFetch()
+})
+
 onMounted(fetchFiles)
 
 /** ---------- Utils ---------- **/
@@ -249,62 +281,114 @@ function formatSize(n?: number | null) {
 }
 function formatDate(iso: string) {
   const d = new Date(iso)
-  return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(d)
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(d)
 }
 function getRowId(row: FileItem) { return row.doc_id }
 </script>
 
 <template>
-  <!-- Search & Tools -->
+  <!-- Search & Filters -->
   <BodyCard>
-    <h1 class="font-semibold text-lg mb-4">Stored Files</h1>
-    <div class="flex flex-col gap-4 w-full">
-      <!-- Search Row -->
-      <div class="flex items-center gap-3 px-4 py-3.5 border-b border-accented overflow-x-auto">
-        
+    <h1 class="font-semibold text-lg mb-4">Search Files</h1>
+
+    <!-- Filter block -->
+    <div class="space-y-4">
+      <!-- Grid of filters -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 px-4 py-4 border-b border-accented bg-muted/20 rounded-md">
         <UInput
           v-model="filenameQuery"
-          class="max-w-sm min-w-[16ch]"
           placeholder="Search filename…"
           icon="i-heroicons-magnifying-glass-20-solid"
         />
-        <GroupSelect v-model="selectedGroupId" :include-no-group="true" class="w-64" />
+
+        <GroupSelect v-model="selectedGroupId" :include-no-group="true" />
+
+        <!-- Date Range -->
+        <UPopover>
+          <UButton color="neutral" variant="subtle" icon="i-lucide-calendar">
+            <template v-if="dateRange.start">
+              <template v-if="dateRange.end">
+                {{ dateRange.start.toDate(getLocalTimeZone()).toLocaleDateString() }} –
+                {{ dateRange.end.toDate(getLocalTimeZone()).toLocaleDateString() }}
+              </template>
+              <template v-else>
+                {{ dateRange.start.toDate(getLocalTimeZone()).toLocaleDateString() }}
+              </template>
+            </template>
+            <template v-else>
+              Date range
+            </template>
+          </UButton>
+          <template #content>
+            <UCalendar v-model="dateRange" range class="p-2" :number-of-months="2" />
+          </template>
+        </UPopover>
+
+        <!-- Modality -->
+        <UInputMenu
+          v-model="selectedModality"
+          :items="[
+            { label: 'All', value: null },
+            { label: 'Text', value: 'text' },
+            { label: 'Image', value: 'image' },
+            { label: 'Audio', value: 'audio' },
+            { label: 'Video', value: 'video' }
+          ]"
+          value-key="value"
+          label-key="label"
+          placeholder="Select modality…"
+        />
+
+        <UInput v-model.number="minSize" type="number" placeholder="Min size (MB)" />
+        <UInput v-model.number="maxSize" type="number" placeholder="Max size (MB)" />
+      </div>
+
+      <!-- Refresh + total -->
+      <div class="flex justify-between items-center px-4">
         <UButton
           color="neutral"
           icon="i-lucide-refresh-ccw"
           variant="ghost"
           @click="fetchFiles"
         >
-          Refresh Table 
+          Refresh Table
         </UButton>
-
-        <div class="ms-auto flex items-center gap-3 text-sm text-muted">
+        <div class="text-sm text-muted">
           <span v-if="!pending">Total: {{ total.toLocaleString() }}</span>
           <span v-else>Loading…</span>
         </div>
       </div>
+    </div>
+  </BodyCard>
 
-      <!-- Bulk Actions -->
-      <div class="flex items-center gap-20 px-4 py-2 border-b border-accented bg-muted/30">
-        
-        <GroupSelect
-          :model-value="null"
-          placeholder="Move selected to group…"
-          :include-no-group="true"
-          class="w-64"
-          :disabled="!selectedRowIds().length || updatingGroup"
-          @update:model-value="bulkChangeGroup"
-        />
-        <UButton
-          color="error"
-          icon="i-lucide-trash-2"
-          variant="outline"
-          :disabled="!selectedRowIds().length || deleting"
-          @click="deleteSelected"
-        >
-          Delete Selected
-        </UButton>
-      </div>
+  <!-- Bulk actions -->
+  <BodyCard>
+    <h2 class="font-semibold text-lg mb-3">Bulk Actions</h2>
+    <div class="flex flex-wrap gap-4 items-center px-4 py-3 border-b border-accented bg-muted/20 rounded-md">
+      <GroupSelect
+        :model-value="null"
+        placeholder="Move selected to group…"
+        :include-no-group="true"
+        class="w-64 mr-10"
+        :disabled="!selectedRowIds().length || updatingGroup"
+        @update:model-value="bulkChangeGroup"
+      />
+
+      <UButton
+        color="error"
+        icon="i-lucide-trash-2"
+        variant="outline"
+        :disabled="!selectedRowIds().length || deleting"
+        @click="deleteSelected"
+      >
+        Delete Selected
+      </UButton>
     </div>
   </BodyCard>
 
@@ -348,3 +432,4 @@ function getRowId(row: FileItem) { return row.doc_id }
     />
   </BodyCard>
 </template>
+

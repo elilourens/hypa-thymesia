@@ -1,3 +1,4 @@
+# app/api/routes/files.py
 from typing import Optional, Literal
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -33,25 +34,40 @@ class FilesResponse(BaseModel):
     total: int
     has_next: bool
 
+
 @router.get("", response_model=FilesResponse)
 def list_files(
     q: Optional[str] = Query(None, description="search in filename (case-insensitive)"),
-    modality: Optional[str] = Query(None, pattern="^(text|image)$"),
+
+    # ✅ broadened to allow audio / video or any other string
+    modality: Optional[str] = Query(
+        None,
+        description="Filter by modality such as text, image, audio, video"
+    ),
+
     created_from: Optional[str] = Query(None, description="ISO date or timestamp"),
     created_to: Optional[str] = Query(None, description="ISO date or timestamp"),
+
     min_size: Optional[int] = Query(None, ge=0),
     max_size: Optional[int] = Query(None, ge=0),
+
     sort: SortField = Query("created_at"),
     dir: SortDir = Query("desc"),
+
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
-    recent: Optional[bool] = Query(None, description="shortcut for sort=created_at desc"),
+
+    recent: Optional[bool] = Query(
+        None, description="shortcut for sort=created_at desc"
+    ),
+
     # NEW
     group_id: Optional[str] = Query(None, description="filter by group"),
     group_sort: GroupSort = Query(
         "none",
         description="group_then_time = order by group then created_at desc"
     ),
+
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
 ):
@@ -59,8 +75,8 @@ def list_files(
     if recent:
         sort, dir = "created_at", "desc"
 
-    # Choose base: if sorting/filtering by group -> use the augmented view
-    base_table = "app_docs_with_group"  # always
+    # Choose base: always use augmented view
+    base_table = "app_docs_with_group"
 
     sb = supabase.table(base_table).select("*", count="exact").eq("user_id", user_id)
 
@@ -98,6 +114,7 @@ def list_files(
     resp = sb.execute()
     items = resp.data or []
     total = getattr(resp, "count", None) or 0
+
     return FilesResponse(
         items=items,
         page=page,
