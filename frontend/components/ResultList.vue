@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { useFilesApi } from '~/composables/useFiles'       // ⬅️ import API
-const { getSignedUrl } = useFilesApi()                     // ⬅️ pull in helper
+import { ref, watch } from 'vue'
+import { useFilesApi } from '~/composables/useFiles'
+const { getSignedUrl } = useFilesApi()
 const toast = useToast()
 
 const props = defineProps<{ results: any[], deleting?: boolean }>()
+
+// ========== Utility Functions ==========
 
 function getFileName(path?: string) {
   if (!path) return '(unknown file)'
@@ -31,7 +34,7 @@ function renderHighlightedText(
   return out
 }
 
-// deep-link builder for PDFs & DOCX
+// Builds URLs for deep linking
 function buildDeepLink(baseUrl: string, r: any) {
   const mime = r.metadata?.mime_type || ''
   if (mime.includes('application/pdf') && r.metadata?.page_number) {
@@ -43,7 +46,8 @@ function buildDeepLink(baseUrl: string, r: any) {
   return baseUrl
 }
 
-// Lazy open
+// ========== Actions ==========
+
 async function handleOpen(r: any) {
   try {
     const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
@@ -58,7 +62,6 @@ async function handleOpen(r: any) {
   }
 }
 
-// Lazy download (for DOCX or generic)
 async function handleDownload(r: any) {
   try {
     const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
@@ -72,6 +75,28 @@ async function handleDownload(r: any) {
     })
   }
 }
+
+// ========== Auto Fetch Signed URLs for Images ==========
+
+// whenever results change, populate missing signed URLs
+watch(
+  () => props.results,
+  async (newResults) => {
+    if (!newResults?.length) return
+    for (const r of newResults) {
+      const modality = (r.metadata?.modality || '').toLowerCase()
+      if (modality === 'image' && !r.metadata?.signed_url) {
+        try {
+          const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
+          if (url) r.metadata.signed_url = url
+        } catch (err) {
+          console.error('Failed to sign URL for', r.metadata.storage_path, err)
+        }
+      }
+    }
+  },
+  { immediate: true, deep: true }
+)
 </script>
 
 <template>
@@ -134,12 +159,14 @@ async function handleDownload(r: any) {
             v-if="r.metadata?.signed_url"
             :src="r.metadata.signed_url"
             :alt="r.metadata?.title || 'image result'"
-            class="object-contain mx-auto p-2"
+            class="object-contain mx-auto p-2 rounded-md border border-gray-200"
           />
-          <p v-else>{{ r.metadata?.title || '(image)' }}</p>
+          <p v-else class="text-sm text-gray-400 italic">
+            (Image loading...)
+          </p>
         </div>
 
-        <!-- Inline PDF preview (kept if already signed_url from backend) -->
+        <!-- Inline PDF preview -->
         <div v-else-if="(r.metadata?.mime_type || '').includes('application/pdf')">
           <iframe
             v-if="r.metadata?.signed_url"
@@ -165,5 +192,9 @@ async function handleDownload(r: any) {
         <p v-else>{{ r.metadata?.title || '(unknown modality)' }}</p>
       </div>
     </UCard>
+  </div>
+
+  <div v-else class="text-gray-400 text-sm italic text-center py-8">
+    No results found.
   </div>
 </template>
