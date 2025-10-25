@@ -15,6 +15,7 @@ export function useIngest() {
   }
 
   // --- Upload ---
+
   async function uploadFile(file: File, groupId?: string) {
     try {
       const headers = await authHeaders()
@@ -36,7 +37,7 @@ export function useIngest() {
   type BaseQueryOpts = { top_k?: number; group_id?: string }
   type TextQueryOpts = BaseQueryOpts & {
     query: string
-    route: 'text' | 'image'
+    route: 'text' | 'image' | 'extracted_image' // UPDATED
   }
   type ImageQueryOpts = BaseQueryOpts & { file: File }
 
@@ -48,6 +49,11 @@ export function useIngest() {
     metadata: {
       text?: string
       highlight_spans?: HighlightSpan[]
+      source?: string // NEW: 'extracted' for deep embeds
+      parent_filename?: string // NEW: parent document name
+      page_number?: number // NEW: page number
+      public_url?: string // NEW: direct image URL
+      dimensions?: string // NEW: image dimensions
       [key: string]: any
     }
   }

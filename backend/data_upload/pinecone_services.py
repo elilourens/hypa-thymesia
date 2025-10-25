@@ -1,3 +1,5 @@
+# data_upload/pinecone_services.py
+
 import os
 from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime
@@ -11,8 +13,6 @@ _PINECONE_KEY = os.getenv("PINECONE_API_KEY") or os.getenv("PINECONE_KEY")
 if not _PINECONE_KEY:
     raise RuntimeError("Missing PINECONE_API_KEY (or PINECONE_KEY).")
 
-# NOTE: Pinecone >=5 does not require an environment/region param for serverless;
-# keeping optional for compatibility if you set it.
 pc = Pinecone(
     api_key=_PINECONE_KEY,
     environment=os.getenv("PINECONE_ENVIRONMENT") or None,
@@ -20,23 +20,27 @@ pc = Pinecone(
 
 TEXT_INDEX_NAME = os.getenv("PINECONE_TEXT_INDEX_NAME")
 IMAGE_INDEX_NAME = os.getenv("PINECONE_IMAGE_INDEX_NAME")
+EXTRACTED_IMAGE_INDEX_NAME = os.getenv("PINECONE_EXTRACTED_IMAGE_INDEX_NAME")  # NEW
 
 if not TEXT_INDEX_NAME:
     raise RuntimeError("Missing PINECONE_TEXT_INDEX_NAME.")
 if not IMAGE_INDEX_NAME:
     raise RuntimeError("Missing PINECONE_IMAGE_INDEX_NAME.")
+if not EXTRACTED_IMAGE_INDEX_NAME:
+    raise RuntimeError("Missing PINECONE_EXTRACTED_IMAGE_INDEX_NAME.")
 
 # Lazy init: create Index handles
 _text_index = pc.Index(TEXT_INDEX_NAME)
 _image_index = pc.Index(IMAGE_INDEX_NAME)
+_extracted_image_index = pc.Index(EXTRACTED_IMAGE_INDEX_NAME) 
 
-# Model dims (lock these in; change here if you ever swap models)
+# Model dims 
 TEXT_DIM = 384          # all-MiniLM-L12-v2
 IMAGE_TEXT_DIM = 512    # clip-ViT-B-32 (text+image)
 
 MAX_BATCH = int(os.getenv("PINECONE_MAX_BATCH", "100"))
 
-Modality = Literal["text", "image", "clip_text"]  # clip_text = CLIP text encoder
+Modality = Literal["text", "image", "clip_text", "extracted_image"] 
 
 # -------------------- Utilities --------------------
 def _chunked(xs: list, n: int):
@@ -49,6 +53,8 @@ def _index_for_modality(modality: Modality):
     # Both CLIP-image and CLIP-text embeddings live in the same 512-D space
     if modality in ("image", "clip_text"):
         return _image_index, IMAGE_TEXT_DIM
+    if modality == "extracted_image":  # NEW
+        return _extracted_image_index, IMAGE_TEXT_DIM
     raise ValueError(f"Unknown modality: {modality}")
 
 def build_vector_item(*, vector_id: str, values: List[float], metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -98,7 +104,7 @@ def delete_vectors_by_ids(
     index.delete(ids=ids, namespace=namespace)
 
 def query_vectors(
-    *   ,
+    *,
     vector: List[float],
     modality: Modality,
     top_k: int = 1,
@@ -111,6 +117,7 @@ def query_vectors(
     - modality="text" for all-MiniLM-L12-v2
     - modality="image" for CLIP image embeddings
     - modality="clip_text" for CLIP text embeddings
+    - modality="extracted_image" for extracted deep embed images
     """
     index, expected_dim = _index_for_modality(modality)
     _guard_dims(vector, expected_dim, modality=modality)

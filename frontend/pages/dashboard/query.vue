@@ -9,7 +9,7 @@ import ResultList from '@/components/ResultList.vue'
 
 const { queryText } = useIngest()
 
-const queryRoute = ref<'text'|'image'>('text')
+const queryRoute = ref<'text'|'image'|'extracted_image'>('text') // UPDATED
 const queryTextInput = ref('')
 const loading = ref(false)
 const error = ref<string|null>(null)
@@ -18,10 +18,11 @@ const results = ref<any[]>([])
 // Group selection
 const selectedGroup = ref<string | null>(null) // null = All groups
 
-// Radio items for route selection
+// Radio items for route selection - UPDATED
 const routeItems: RadioGroupItem[] = [
   { value: 'text', label: 'Text' },
-  { value: 'image', label: 'Images' }
+  { value: 'image', label: 'Uploaded Images' },
+  { value: 'extracted_image', label: 'Document Images' } // NEW
 ]
 
 // ---- Actions ----
@@ -90,16 +91,10 @@ async function run() {
 
       <USeparator orientation="horizontal" class="h-auto self-stretch" size="lg"/>
 
-      
-
       <p v-if="error" class="text-red-500 text-sm text-center">{{ error }}</p>
-
-      <!-- Results (no delete feature) -->
-      
     </div>
   </BodyCard>
   <div class="m-10 p-2">
     <ResultList :results="results" />
   </div>
-  
 </template>

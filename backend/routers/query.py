@@ -19,7 +19,7 @@ async def query_endpoint(
     req: QueryRequest,
     auth: AuthUser = Depends(get_current_user),
     settings=Depends(get_settings),
-    supabase=Depends(get_supabase),        # kept here if you need for other reasons
+    supabase=Depends(get_supabase),
 ):
     if bool(req.query_text) == bool(req.image_b64):
         raise HTTPException(
@@ -35,10 +35,10 @@ async def query_endpoint(
     else:
         if req.route is None:
             chosen_route = "text"
-        elif req.route not in ("text", "image"):
+        elif req.route not in ("text", "image", "extracted_image"):  # UPDATED
             raise HTTPException(
                 422,
-                detail="route must be 'text' or 'image' (or omitted)."
+                detail="route must be 'text', 'image', or 'extracted_image' (or omitted)."
             )
         else:
             chosen_route = req.route
@@ -58,6 +58,13 @@ async def query_endpoint(
         else:
             vec = (await embed_clip_texts([req.query_text]))[0]
             modality_arg = "clip_text"
+    elif chosen_route == "extracted_image":  # NEW
+        # Search extracted images using text query
+        if req.query_text:
+            vec = (await embed_clip_texts([req.query_text]))[0]
+            modality_arg = "extracted_image"
+        else:
+            raise HTTPException(422, detail="extracted_image route requires query_text")
     else:
         raise HTTPException(500, detail="Internal routing error")
 
@@ -95,7 +102,19 @@ async def query_endpoint(
         # keep only bucket & path for later use by /storage/signed-url
         bucket = md.get("bucket")
         storage_path = md.get("storage_path")
-        md = md | {"bucket": bucket, "storage_path": storage_path}
+        
+        # NEW: For extracted images, also include parent doc info
+        if md.get("source") == "extracted":
+            md = md | {
+                "bucket": bucket,
+                "storage_path": storage_path,
+                "parent_filename": md.get("parent_filename"),
+                "parent_storage_path": md.get("parent_storage_path"),
+                "page_number": md.get("page_number"),
+                "public_url": md.get("public_url"),  # Direct image URL
+            }
+        else:
+            md = md | {"bucket": bucket, "storage_path": storage_path}
 
         # 🔑 Add highlighting for text-based metadata
         if "text" in md and req.query_text:
@@ -110,7 +129,7 @@ async def query_endpoint(
         )
 
     # --- BM25 re-ranking (text only) ---
-    if req.query_text:
+    if req.query_text and chosen_route == "text":
         matches = rerank_with_bm25(req.query_text, matches, req.bm25_weight)
 
     return QueryResponse(
