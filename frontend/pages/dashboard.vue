@@ -11,7 +11,7 @@ const items: TabsItem[] = [
   { label: 'Files',   value: 'files'   },
   { label: 'Groups', value: 'groups' },
   { label: 'AI',     value: 'ai'     },
-  { label: 'Docs',   value: 'docs'   },
+  { label: 'Link',   value: 'link'   },
   { label: 'Settings', value: 'settings' },
   { label: 'Usage', value: 'usage' },
 ]
@@ -21,7 +21,7 @@ const active = computed<string>({
     const seg = route.path.startsWith('/dashboard/')
       ? route.path.split('/')[2] || 'query'
       : 'query'
-    return ['query','upload','files','ai','groups','settings'].includes(seg) ? seg : 'query'
+    return ['query','upload','files','ai','groups','settings','link'].includes(seg) ? seg : 'query'
   },
   set(val) {
     if (val !== active.value) router.push(`/dashboard/${val}`)

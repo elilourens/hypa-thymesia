@@ -11,7 +11,7 @@ class AuthUser:
     def __init__(self, sub: str, email: Optional[str] = None, token: Optional[str] = None):
         self.id = sub
         self.email = email
-        self.token = token          # ✅ store raw JWT so we can forward it
+        self.token = token          
 
 _jwks_client = None
 
@@ -39,7 +39,7 @@ def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)) -> 
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid or expired token: {e}")
 
-    # ✅ Include token so downstream (like the retriever) can use it
+    
     return AuthUser(
         sub=payload["sub"],
         email=payload.get("email"),
