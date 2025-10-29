@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime, timedelta
 import requests
+import os
 from supabase import create_client
 from core.security import get_current_user, AuthUser
 from core.config import get_settings
@@ -89,7 +91,12 @@ async def refresh_google_token(
     try:
         print(f"Refreshing Google token for user: {auth.id}")
         
-        settings = get_settings()
+        # Get credentials directly from environment
+        google_client_id = os.getenv("GOOGLE_CLIENT_ID")
+        google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+        
+        if not google_client_id or not google_client_secret:
+            raise HTTPException(status_code=500, detail="Google credentials not configured")
         
         # Get the stored token
         response = supabase_client.table("user_oauth_tokens").select("*").eq("user_id", auth.id).eq("provider", "google").single().execute()
@@ -104,8 +111,8 @@ async def refresh_google_token(
         # Exchange refresh token for new access token
         token_url = "https://oauth2.googleapis.com/token"
         payload = {
-            "client_id": settings.SUPABASE_URL,  # You'll need to add these to settings
-            "client_secret": settings.SUPABASE_KEY,  # You'll need to add these to settings
+            "client_id": google_client_id,
+            "client_secret": google_client_secret,
             "refresh_token": refresh_token,
             "grant_type": "refresh_token"
         }
@@ -120,10 +127,14 @@ async def refresh_google_token(
         token_data = token_response.json()
         print(f"Refresh successful, new token (first 20 chars): {token_data['access_token'][:20]}...")
         
+        # Calculate proper expires_at timestamp
+        expires_in = token_data.get("expires_in", 3600)
+        expires_at = (datetime.utcnow() + timedelta(seconds=expires_in)).isoformat()
+        
         # Update token in database
         supabase_client.table("user_oauth_tokens").update({
             "access_token": token_data["access_token"],
-            "expires_at": token_data.get("expires_in"),
+            "expires_at": expires_at,
             "updated_at": "now()"
         }).eq("user_id", auth.id).eq("provider", "google").execute()
         

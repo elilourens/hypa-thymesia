@@ -1,5 +1,6 @@
 import os
 import hashlib
+import logging
 from typing import Optional, List, Dict, Any
 from uuid import uuid4
 from datetime import datetime
@@ -10,6 +11,8 @@ from supabase import create_client, Client
 from PIL import Image
 
 from data_upload.pinecone_services import build_vector_item, upsert_vectors
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -23,17 +26,43 @@ IMAGE_BUCKET = os.getenv("IMAGE_BUCKET", "images")
 
 
 def upload_image_to_bucket(file_content: bytes, filename: str, bucket: str = IMAGE_BUCKET) -> Optional[str]:
+    logger.info(f"upload_image_to_bucket called: filename={filename}, size={len(file_content)} bytes, bucket={bucket}")
+    
     ext = os.path.splitext(filename)[1].lower()
+    logger.info(f"File extension: {ext}")
+    
     if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        logger.warning(f"Unsupported image extension: {ext}")
         return None
+    
     try:
+        logger.info("Opening image with PIL...")
         img = Image.open(BytesIO(file_content))
+        logger.info(f"Image opened successfully: format={img.format}, size={img.size}")
+        
+        logger.info("Verifying image...")
         img.verify()
-    except Exception:
+        logger.info("Image verification passed")
+    except Exception as e:
+        logger.error(f"Image validation failed: {e}", exc_info=True)
         return None
+    
     file_path = f"uploads/{uuid4()}_{filename}"
-    resp = supabase.storage.from_(bucket).upload(file_path, file_content)
-    return file_path if resp else None
+    logger.info(f"Uploading to bucket '{bucket}' at path: {file_path}")
+    
+    try:
+        resp = supabase.storage.from_(bucket).upload(file_path, file_content)
+        logger.info(f"Upload response: {resp}")
+        
+        if resp:
+            logger.info(f"Upload successful, returning path: {file_path}")
+            return file_path
+        else:
+            logger.error("Upload returned empty response")
+            return None
+    except Exception as e:
+        logger.error(f"Upload failed: {e}", exc_info=True)
+        return None
 
 
 def delete_image_from_bucket(filepath: str, bucket: str = IMAGE_BUCKET) -> bool:
@@ -119,7 +148,7 @@ def ingest_single_image(
         user_id=user_id,
         doc_id=doc_id,
         storage_path=storage_path,
-        bucket=IMAGE_BUCKET,
+        bucket="images",
         mime_type=mime_type,
         size_bytes=size_bytes,
     )
