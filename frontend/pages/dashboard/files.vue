@@ -210,7 +210,16 @@ const columns: TableColumn<FileItem>[] = [
         ? h('span', { class: 'inline-flex items-center gap-1' }, [h(UIcon, { name: 'i-heroicons-folder' }), row.original.group_name])
         : '—'
   },
-  // NEW Actions column
+  {
+    accessorKey: 'storage_provider',
+    header: 'Storage',
+    cell: ({ row }) => {
+      const provider = row.original.storage_provider || 'supabase'
+      const providerLabel = provider === 'google_drive' ? 'Google Drive' : provider === 'supabase' ? 'Supabase' : provider
+      const color = provider === 'google_drive' ? 'blue' : 'gray'
+      return h(UBadge, { variant: 'subtle', color }, () => providerLabel)
+    }
+  },
   {
     id: 'actions',
     header: 'Actions',

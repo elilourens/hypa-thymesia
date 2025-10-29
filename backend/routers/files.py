@@ -17,6 +17,7 @@ class FileItem(BaseModel):
     filename: str
     bucket: str
     storage_path: str
+    storage_provider: Optional[str] = None  # ✅ ADDED THIS FIELD
     mime_type: str
     modality: str
     size_bytes: Optional[int] = None

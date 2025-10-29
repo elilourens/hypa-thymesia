@@ -33,21 +33,10 @@ class IngestGoogleDriveFileRequest(BaseModel):
 def download_google_drive_file(file_id: str, url: str) -> bytes:
     """
     Download a file from Google Drive, handling confirmation pages.
-    This uses the pattern: first request gets confirmation page with token in HTML,
-    then we extract it and retry.
-    
-    Args:
-        file_id: The Google Drive file ID
-        url: The original Google Drive URL
-        
-    Returns:
-        bytes: The file content
     """
     logger.info(f"Starting Google Drive download for file: {file_id}")
     
     session = requests.Session()
-    
-    # Set a user agent to avoid being blocked
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     })
@@ -56,28 +45,21 @@ def download_google_drive_file(file_id: str, url: str) -> bytes:
         download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         logger.info(f"Initial request to: {download_url}")
         
-        # First request
         response = session.get(download_url, timeout=60, stream=True, allow_redirects=True)
         response.raise_for_status()
         
         content_type = response.headers.get('content-type', '').lower()
         logger.info(f"Response content-type: {content_type}")
         
-        # Check if we got a confirmation page
         if 'text/html' in content_type:
             logger.info("Received HTML, searching for confirmation token...")
             
             html_text = response.text
-            
-            # Modern Google Drive uses this pattern
-            # Look for: id=XXXXX or key=XXXXX patterns in the page
-            # The token appears in various forms, try multiple patterns
-            
             patterns = [
-                r'"confirm"\s*:\s*"([^"]+)"',  # JSON format
-                r'confirm["\']?\s*:\s*["\']([^"\']+)["\']',  # Property format
-                r'id=["\']([^"\']+)["\']',  # id parameter
-                r'(?:uuid|token)["\']?\s*:\s*["\']([a-zA-Z0-9_-]+)["\']',  # uuid/token
+                r'"confirm"\s*:\s*"([^"]+)"',
+                r'confirm["\']?\s*:\s*["\']([^"\']+)["\']',
+                r'id=["\']([^"\']+)["\']',
+                r'(?:uuid|token)["\']?\s*:\s*["\']([a-zA-Z0-9_-]+)["\']',
             ]
             
             token = None
@@ -89,16 +71,13 @@ def download_google_drive_file(file_id: str, url: str) -> bytes:
                     break
             
             if not token:
-                # As a fallback, look for any long alphanumeric string that might be a token
                 logger.warning("Standard patterns failed, searching for token-like strings...")
                 matches = re.findall(r'[a-zA-Z0-9_-]{20,}', html_text)
                 if matches:
-                    # Take the first long string (often is the token)
                     token = matches[0]
                     logger.info(f"Using fallback token: {token[:20]}...")
             
             if token:
-                # Retry with token
                 download_url_with_token = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={token}"
                 logger.info(f"Retrying with token in URL...")
                 
@@ -110,25 +89,22 @@ def download_google_drive_file(file_id: str, url: str) -> bytes:
             else:
                 logger.warning("Could not extract token, proceeding with current response...")
         
-        # Now download the actual content
         content = b''
         chunk_count = 0
         
-        for chunk in response.iter_content(chunk_size=65536):  # 64KB chunks
+        for chunk in response.iter_content(chunk_size=65536):
             if chunk:
                 content += chunk
                 chunk_count += 1
-                if chunk_count % 10 == 0:  # Log every 640KB
+                if chunk_count % 10 == 0:
                     logger.info(f"Downloaded {len(content)} bytes...")
         
         logger.info(f"Download complete: {len(content)} bytes total")
         
-        # Validate content is binary, not HTML
         if len(content) < 10:
             logger.error(f"Downloaded content too small: {len(content)} bytes")
             raise Exception(f"File too small ({len(content)} bytes) - may be invalid")
         
-        # Check if it's HTML (common error case)
         if content.startswith(b'<!DOCTYPE') or content.startswith(b'<html') or content.startswith(b'<HTML'):
             logger.error("Downloaded content is HTML, not a file")
             logger.debug(f"Content preview: {content[:500]}")
@@ -154,8 +130,9 @@ async def ingest_google_drive_file(
     request: IngestGoogleDriveFileRequest = Body(...)
 ):
     """
-    Download a Google Drive file and ingest it using existing Supabase logic.
-    This reuses the upload-text-and-images pipeline.
+    Ingest a Google Drive file by storing a reference instead of uploading it.
+    For images: Store reference + embed to Pinecone
+    For documents: Extract text, store reference, embed text to Pinecone
     """
     user_id = auth.id
     logger.info(f"Ingesting Google Drive file: {request.filename} (ID: {request.google_drive_id})")
@@ -181,28 +158,32 @@ async def ingest_google_drive_file(
 
     logger.info(f"File type: {ext}, MIME: {request.mime_type}")
 
-    # --- Handle standalone images ---
+    # --- Generate doc_id once for all entries ---
+    doc_id = str(uuid4())
+    logger.info(f"Generated doc_id: {doc_id}")
+
+    # --- Use a virtual reference path with FILENAME included ---
+    # Format: google-drive/{file_id}/{filename}
+    # This way when app_docs view extracts filename with regexp_replace, it gets the actual name
+    storage_path = f"google-drive/{request.google_drive_id}/{request.filename}"
+    bucket = "google-drive"  # Virtual bucket name
+
+    # --- Handle standalone images (store as reference) ---
     if ext in supported_images:
-        logger.info("Processing Google Drive file as standalone image")
+        logger.info("Processing Google Drive file as standalone image (reference only)")
         
         try:
-            logger.info(f"Uploading image to bucket: {request.filename}")
-            storage_path = upload_image_to_bucket(content, request.filename)
-            logger.info(f"Upload result: {storage_path}")
-            
-            if not storage_path:
-                logger.error("upload_image_to_bucket returned None")
-                raise HTTPException(500, detail="Failed to upload image to storage - validation failed")
-
-            logger.info(f"Image uploaded to: {storage_path}")
+            logger.info(f"Embedding image for Pinecone...")
             image_vectors = await embed_images([content])
-            doc_id = str(uuid4())
+            
+            # Ingest to Pinecone with Google Drive reference
+            logger.info(f"Storing Google Drive image reference")
             
             result = ingest_single_image(
                 user_id=user_id,
                 filename=request.filename,
                 storage_path=storage_path,
-                file_bytes=content,
+                file_bytes=content,  # Used for embedding only
                 mime_type=request.mime_type or "image/jpeg",
                 embedding_model=settings.EMBED_MODEL,
                 embedding_dim=settings.EMBED_DIM,
@@ -214,33 +195,32 @@ async def ingest_google_drive_file(
                 group_id=request.group_id,
             )
             
-            logger.info(f"Image ingestion complete: doc_id={doc_id}")
+            # Update the chunk records with Google Drive metadata
+            try:
+                supabase.table("app_chunks").update({
+                    "storage_provider": "google_drive",
+                    "external_id": request.google_drive_id,
+                    "external_url": request.google_drive_url,
+                    "bucket": bucket,
+                }).eq("doc_id", doc_id).execute()
+                logger.info(f"Updated chunk metadata with Google Drive reference and filename in storage_path")
+            except Exception as e:
+                logger.warning(f"Could not update Google Drive metadata: {e}")
+            
+            logger.info(f"Image reference stored: doc_id={doc_id}")
             return {
                 "doc_id": doc_id,
                 "text_chunks_ingested": 0,
                 "images_extracted": 1,
-                "source": "google_drive"
+                "source": "google_drive",
+                "storage_type": "reference"
             }
-        except HTTPException:
-            raise
         except Exception as e:
             logger.error(f"Error processing image: {e}", exc_info=True)
             raise HTTPException(500, detail=f"Error processing image: {str(e)}")
 
-    # --- Handle text/PDF/docx with deep embeds ---
+    # --- Handle text/PDF/docx (reference + embeddings) ---
     logger.info(f"Processing Google Drive file as document: {ext}")
-    doc_id = str(uuid4())
-    logger.info(f"Generated doc_id: {doc_id}")
-    
-    storage_path = upload_text_to_bucket(
-        content,
-        request.filename,
-        mime_type=request.mime_type,
-    )
-    if not storage_path:
-        raise HTTPException(500, detail="Failed to upload text to storage")
-    
-    logger.info(f"Uploaded to storage: {storage_path}")
 
     # Create temp file for extraction
     with NamedTemporaryFile(prefix="google_drive_", suffix=suffix, delete=False) as tmp:
@@ -297,7 +277,7 @@ async def ingest_google_drive_file(
         "preview": (c.get("chunk_text") or "")[:180].replace("\n", " "),
     } for c in chunks]
 
-    logger.info("Ingesting text chunks to Pinecone")
+    logger.info("Ingesting text chunks to Pinecone (with Google Drive reference)")
     text_result = ingest_text_chunks(
         user_id=user_id,
         filename=request.filename,
@@ -316,10 +296,22 @@ async def ingest_google_drive_file(
     )
     logger.info(f"Text ingestion complete: {text_result}")
     
+    # Update chunks to mark as Google Drive reference
+    try:
+        supabase.table("app_chunks").update({
+            "storage_provider": "google_drive",
+            "external_id": request.google_drive_id,
+            "external_url": request.google_drive_url,
+            "bucket": bucket,
+        }).eq("doc_id", doc_id).execute()
+        logger.info(f"Updated text chunks with Google Drive reference metadata and filename in storage_path")
+    except Exception as e:
+        logger.warning(f"Could not update Google Drive metadata: {e}")
+    
     # --- Embed and ingest extracted images ---
     images_result = None
     if images_data:
-        logger.info(f"Starting image embedding for {len(images_data)} images from Google Drive file")
+        logger.info(f"Starting image embedding for {len(images_data)} extracted images from Google Drive file")
         try:
             image_bytes_list = [img["image_bytes"] for img in images_data]
             image_vectors = await embed_images(image_bytes_list)
@@ -352,5 +344,6 @@ async def ingest_google_drive_file(
         "doc_id": doc_id,
         "text_chunks_ingested": text_result["vector_count"],
         "images_extracted": images_result["images_ingested"] if images_result else 0,
-        "source": "google_drive"
+        "source": "google_drive",
+        "storage_type": "reference"
     }

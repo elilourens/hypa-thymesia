@@ -1,11 +1,9 @@
-// composables/useFiles.ts
 import { useSupabaseClient } from '#imports'
 
 export type SortField = 'created_at' | 'size' | 'name'
 export type SortDir = 'asc' | 'desc'
 export type GroupSort = 'none' | 'group_then_time'
 
-// 👉 Extend this union if you want more modalities.
 export type Modality = 'text' | 'image' | 'audio' | 'video'
 
 export interface FileItem {
@@ -14,6 +12,7 @@ export interface FileItem {
   filename: string
   bucket: string
   storage_path: string
+  storage_provider?: string | null
   mime_type: string
   modality: Modality | null
   size_bytes?: number | null
@@ -63,7 +62,7 @@ export function useFilesApi() {
     page?: number
     page_size?: number
     recent?: boolean | null
-    group_id?: string | null        // can be '' for “no group”
+    group_id?: string | null        // can be '' for "no group"
     group_sort?: GroupSort
   }): Promise<FilesResponse> {
     const headers = await authHeaders()
@@ -72,7 +71,7 @@ export function useFilesApi() {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== undefined && v !== null) {
         if (k === 'group_id') {
-          // ⚡ allow empty string so backend can interpret as “no group”
+          // ⚡ allow empty string so backend can interpret as "no group"
           sp.set(k, v as string)
         } else if (v !== '') {
           sp.set(k, String(v))
@@ -97,18 +96,42 @@ export function useFilesApi() {
   }
 
   /**
-   * Lazily fetch a signed URL for one file.
+   * Get a signed URL for one file.
+   * Handles both Supabase and Google Drive files.
    */
   async function getSignedUrl(bucket: string, path: string): Promise<string> {
     const headers = await authHeaders()
+    
     try {
-      const res = await $fetch<{ signed_url: string }>(
+      // Check if this is a Google Drive file BEFORE making the request
+      if (bucket === 'google-drive' || path.startsWith('google-drive/')) {
+        // For Google Drive, extract the file ID and return preview URL directly
+        const fileId = path.replace('google-drive/', '')
+        if (fileId) {
+          const previewUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
+          console.log('Using Google Drive preview URL:', previewUrl)
+          return previewUrl
+        }
+      }
+
+      // For Supabase files, call the backend endpoint
+      const res = await $fetch<{ signed_url: string; provider: string }>(
         `${API_BASE}/storage/signed-url`,
-        { method: 'GET', headers, params: { bucket, path } }
+        { 
+          method: 'GET', 
+          headers, 
+          params: { bucket, path } 
+        }
       )
+      
+      if (!res.signed_url) {
+        throw new Error('No signed URL returned')
+      }
+      
       return res.signed_url
     } catch (err: any) {
-      throw new Error(err?.data || err?.message || 'Failed to get signed URL')
+      console.error('Error getting signed URL:', err)
+      throw new Error(err?.data?.detail || err?.message || 'Failed to get signed URL')
     }
   }
 

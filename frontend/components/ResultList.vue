@@ -8,9 +8,8 @@ const props = defineProps<{ results: any[], deleting?: boolean }>()
 
 // ========== Utility Functions ==========
 
-function getFileName(path?: string) {
-  if (!path) return '(unknown file)'
-  return path.split('_').pop() || path
+function getFileName(title?: string) {
+  return title || '(unknown file)'
 }
 
 function renderHighlightedText(
@@ -46,10 +45,27 @@ function buildDeepLink(baseUrl: string, r: any) {
   return baseUrl
 }
 
+// Generate Google Drive preview URL
+function getGoogleDrivePreviewUrl(fileId: string): string {
+  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
+}
+
+// Generate Google Drive embed URL for viewing
+function getGoogleDriveViewUrl(fileId: string): string {
+  return `https://drive.google.com/file/d/${fileId}/preview`
+}
+
 // ========== Actions ==========
 
 async function handleOpen(r: any) {
   try {
+    // Check if this is a Google Drive file
+    if (r.metadata?.storage_provider === 'google_drive' && r.metadata?.external_id) {
+      const viewUrl = getGoogleDriveViewUrl(r.metadata.external_id)
+      window.open(viewUrl, '_blank')
+      return
+    }
+
     const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
     if (!url) throw new Error('No URL returned')
     window.open(buildDeepLink(url, r), '_blank')
@@ -64,6 +80,13 @@ async function handleOpen(r: any) {
 
 async function handleDownload(r: any) {
   try {
+    // Check if this is a Google Drive file
+    if (r.metadata?.storage_provider === 'google_drive' && r.metadata?.external_id) {
+      const downloadUrl = `https://drive.google.com/uc?export=download&id=${r.metadata.external_id}`
+      window.open(downloadUrl, '_blank')
+      return
+    }
+
     const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
     if (!url) throw new Error('No URL returned')
     window.open(url, '_blank')
@@ -85,6 +108,16 @@ watch(
     if (!newResults?.length) return
     for (const r of newResults) {
       const modality = (r.metadata?.modality || '').toLowerCase()
+      
+      // For Google Drive files, use preview URL directly (no backend call needed)
+      if (r.metadata?.storage_provider === 'google_drive') {
+        if (r.metadata?.external_id && !r.metadata?.signed_url) {
+          r.metadata.signed_url = getGoogleDrivePreviewUrl(r.metadata.external_id)
+        }
+        continue
+      }
+      
+      // For regular files, fetch signed URL from backend
       if (modality === 'image' && !r.metadata?.signed_url) {
         try {
           const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
@@ -117,7 +150,10 @@ watch(
         <!-- File info row -->
         <div class="flex items-center justify-between text-xs text-gray-500">
           <span>
-            File: <strong>{{ getFileName(r.metadata?.storage_path) }}</strong>
+            File: <strong>{{ getFileName(r.metadata?.title) }}</strong>
+            <span v-if="r.metadata?.storage_provider === 'google_drive'" class="ml-1 inline-block">
+              <UBadge variant="subtle" size="xs" color="primary">Google Drive</UBadge>
+            </span>
           </span>
 
           <div class="flex items-center gap-2">
@@ -132,7 +168,7 @@ watch(
             </UButton>
 
             <UButton
-              v-if="(r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document')"
+              v-if="(r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document') || r.metadata?.storage_provider === 'google_drive'"
               size="xs"
               color="primary"
               variant="soft"
@@ -160,6 +196,7 @@ watch(
             :src="r.metadata.signed_url"
             :alt="r.metadata?.title || 'image result'"
             class="object-contain mx-auto p-2 rounded-md border border-gray-200"
+            :title="r.metadata?.storage_provider === 'google_drive' ? 'Google Drive image' : 'Uploaded image'"
           />
           <p v-else class="text-sm text-gray-400 italic">
             (Image loading...)
