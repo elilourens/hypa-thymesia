@@ -232,11 +232,79 @@ export const useGoogleDrive = () => {
     }
   }
 
-  const unlinkGoogle = async (supabaseAccessToken: string) => {
+  const unlinkGoogle = async (client: any, supabaseAccessToken: string) => {
     error.value = ''
     success.value = ''
     
     try {
+      console.log('=== Starting Google unlink process ===')
+      
+      // Step 1: Get user identities from Supabase Auth
+      console.log('Retrieving user identities...')
+      const result = await client.auth.getUserIdentities()
+      console.log('getUserIdentities result:', result)
+      console.log('Result type:', typeof result)
+      console.log('Is array:', Array.isArray(result))
+      
+      // Handle different response formats - Supabase returns { data: { identities: [...] }, error: null }
+      let identities: any[] = []
+      
+      // First priority: result.data.identities (the actual Supabase format)
+      if (result?.data?.identities && Array.isArray(result.data.identities)) {
+        identities = result.data.identities
+      }
+      // Fallback: direct array
+      else if (Array.isArray(result)) {
+        identities = result
+      }
+      // Fallback: result.data is array
+      else if (result?.data && Array.isArray(result.data)) {
+        identities = result.data
+      }
+      // Fallback: result.identities is array
+      else if (result?.identities && Array.isArray(result.identities)) {
+        identities = result.identities
+      }
+      
+      console.log('Processed identities:', identities)
+      console.log('Identities length:', identities.length)
+      
+      // Log each identity in detail
+      identities.forEach((identity: any, index: number) => {
+        console.log(`Identity ${index}:`, {
+          provider: identity.provider,
+          id: identity.id,
+          user_id: identity.user_id,
+          keys: Object.keys(identity)
+        })
+      })
+      
+      console.log('All provider names:', identities.map((i: any) => i.provider))
+      
+      // Step 2: Find the Google identity
+      const googleIdentity = identities.find((identity: any) => {
+        console.log(`Checking identity with provider: "${identity.provider}" against "google"`)
+        return identity.provider === 'google'
+      })
+      
+      if (!googleIdentity) {
+        console.log('Google identity not found. Available providers:', identities.map((i: any) => i.provider).join(', '))
+        throw new Error(`No Google identity found to unlink. Available: ${identities.map((i: any) => i.provider).join(', ')}`)
+      }
+      
+      console.log('Found Google identity, unlinking...')
+      
+      // Step 3: Unlink the Google identity from Supabase
+      const { error: unlinkError } = await client.auth.unlinkIdentity(googleIdentity)
+      
+      if (unlinkError) {
+        throw new Error(unlinkError.message)
+      }
+      
+      console.log('Successfully unlinked Google identity from Supabase Auth')
+      
+      // Step 4: Delete tokens from our backend database
+      console.log('Deleting stored tokens from backend...')
       const response = await fetch('http://localhost:8000/api/v1/unlink-google', {
         method: 'DELETE',
         headers: {
@@ -246,11 +314,15 @@ export const useGoogleDrive = () => {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to unlink Google')
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to delete tokens from backend')
       }
 
+      console.log('Successfully deleted tokens from backend')
       googleLinked.value = false
       success.value = 'Google account unlinked successfully'
+      console.log('=== Google unlink completed successfully ===')
+      
       return await response.json()
     } catch (err) {
       console.error('unlinkGoogle error:', err)

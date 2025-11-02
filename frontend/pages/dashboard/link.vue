@@ -27,7 +27,8 @@ const {
   loading: googleLoading,
   error,
   success,
-  checkGoogleLinked
+  checkGoogleLinked,
+  unlinkGoogle
 } = useGoogleDrive()
 
 const { ingestGoogleDriveFileToSupabase } = useAddGoogleDriveFile()
@@ -44,6 +45,7 @@ const filenameQuery = ref('')
 /** ---------- Import state ---------- **/
 const selectedGroupId = ref<string | null>(null)
 const importing = ref(false)
+const unlinking = ref(false)
 
 /** ---------- Bulk selection helpers ---------- **/
 function selectedRowIds(): string[] {
@@ -262,6 +264,38 @@ async function handleImportToHypaThymesia() {
   }
 }
 
+/** ---------- Unlink handler ---------- **/
+async function handleUnlinkGoogle() {
+  unlinking.value = true
+  try {
+    const { data: { session } } = await client.auth.getSession()
+    if (!session?.access_token) throw new Error('No session')
+
+    await unlinkGoogle(client, session.access_token)
+    
+    // Clear local state
+    data.value = []
+    filenameQuery.value = ''
+    
+    toast.add({
+      title: 'Google account unlinked',
+      description: 'Your Google Drive connection has been removed',
+      color: 'success',
+      icon: 'i-lucide-check'
+    })
+  } catch (e: any) {
+    console.error('Unlink error:', e)
+    toast.add({
+      title: 'Failed to unlink',
+      description: e?.message || 'An error occurred',
+      color: 'error',
+      icon: 'i-lucide-alert-circle'
+    })
+  } finally {
+    unlinking.value = false
+  }
+}
+
 onMounted(async () => {
   const { data: { session } } = await client.auth.getSession()
   if (session?.access_token) {
@@ -305,6 +339,16 @@ function getRowId(row: GoogleDriveFile) { return row.id }
           >
             Link Google Account
           </UButton>
+          <UButton
+              @click="handleUnlinkGoogle"
+              :loading="unlinking"
+              :disabled="googleLoading"
+              variant="ghost"
+              icon="i-lucide-unlink"
+              color="red"
+            >
+              Unlink Google Account
+            </UButton>
         </div>
 
         <div v-else class="space-y-2">
@@ -315,7 +359,7 @@ function getRowId(row: GoogleDriveFile) { return row.id }
             </div>
           </div>
 
-          <div class="flex gap-2">
+          <div class="flex gap-2 flex-wrap">
             <UButton
               @click="fetchGoogleFiles"
               :loading="googleLoading"
@@ -325,19 +369,25 @@ function getRowId(row: GoogleDriveFile) { return row.id }
               Refresh Files
             </UButton>
 
+            
+
+            <!-- Testing button - always visible -->
             <UButton
               @click="async () => {
                 const { data: { session } } = await client.auth.getSession()
                 if (session?.access_token) {
-                  const { unlinkGoogle } = useGoogleDrive()
-                  await unlinkGoogle(session.access_token)
+                  await unlinkGoogle(client, session.access_token)
                 }
               }"
-              :loading="googleLoading"
-              variant="ghost"
-              icon="i-lucide-unlink"
+              :loading="unlinking"
+              :disabled="googleLoading"
+              variant="outline"
+              icon="i-lucide-bug"
+              color="amber"
+              size="sm"
+              class="text-xs"
             >
-              Unlink Google Account
+              [TEST] Direct Unlink
             </UButton>
           </div>
         </div>

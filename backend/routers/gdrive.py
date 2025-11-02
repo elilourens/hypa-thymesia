@@ -170,9 +170,16 @@ async def unlink_google(
         get_settings().SUPABASE_KEY
     ))
 ):
-    """Unlink Google account"""
+    """Unlink Google account from Supabase auth and delete stored tokens"""
     try:
-        supabase_client.table("user_oauth_tokens").delete().eq("user_id", auth.id).eq("provider", "google").execute()
+        print(f"Unlinking Google for user: {auth.id}")
+        
+        # Delete from our custom oauth tokens table
+        try:
+            supabase_client.table("user_oauth_tokens").delete().eq("user_id", auth.id).eq("provider", "google").execute()
+            print("Deleted tokens from user_oauth_tokens table")
+        except Exception as e:
+            print(f"Warning: Failed to delete from user_oauth_tokens: {str(e)}")
         
         return {"success": True, "message": "Google account unlinked"}
     except Exception as e:
