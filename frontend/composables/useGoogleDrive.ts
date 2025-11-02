@@ -303,8 +303,8 @@ export const useGoogleDrive = () => {
       
       console.log('Successfully unlinked Google identity from Supabase Auth')
       
-      // Step 4: Delete tokens from our backend database
-      console.log('Deleting stored tokens from backend...')
+      // Step 4: Delete tokens from our backend database and revoke with Google
+      console.log('Deleting stored tokens from backend and revoking with Google...')
       const response = await fetch('http://localhost:8000/api/v1/unlink-google', {
         method: 'DELETE',
         headers: {
@@ -318,12 +318,14 @@ export const useGoogleDrive = () => {
         throw new Error(errorData.detail || 'Failed to delete tokens from backend')
       }
 
-      console.log('Successfully deleted tokens from backend')
+      const unlinkResult = await response.json()
+      console.log('Backend response:', unlinkResult)
+      console.log('Successfully deleted tokens from backend and revoked with Google')
       googleLinked.value = false
       success.value = 'Google account unlinked successfully'
       console.log('=== Google unlink completed successfully ===')
       
-      return await response.json()
+      return unlinkResult
     } catch (err) {
       console.error('unlinkGoogle error:', err)
       if (err instanceof Error) {
@@ -347,9 +349,14 @@ export const useGoogleDrive = () => {
       const { data } = client.auth.onAuthStateChange(
         async (event: string, session: any) => {
           console.log('Auth state changed:', event)
+          console.log('Session provider_token exists:', !!session?.provider_token)
+          console.log('Session provider_refresh_token exists:', !!session?.provider_refresh_token)
           
-          if (event === 'SIGNED_IN' && session?.provider_token) {
+          // When linking an identity (not signing in), we get USER_UPDATED or INITIAL_SESSION
+          // Check for provider_token presence rather than specific event
+          if (session?.provider_token) {
             console.log('Captured provider token from auth state change')
+            console.log('Event type:', event)
             console.log('Has refresh token:', !!session.provider_refresh_token)
             
             try {
@@ -361,7 +368,8 @@ export const useGoogleDrive = () => {
                   : undefined
                 
                 console.log('Saving Google token with:')
-                console.log('- Access token (first 20 chars):', session.provider_token.substring(0, 20) + '...')
+                console.log('- Supabase access token (first 20 chars):', currentSession.access_token.substring(0, 20) + '...')
+                console.log('- Google access token (first 20 chars):', session.provider_token.substring(0, 20) + '...')
                 console.log('- Refresh token present:', !!session.provider_refresh_token)
                 console.log('- Expires at:', expiresAt)
                 
@@ -374,7 +382,7 @@ export const useGoogleDrive = () => {
                 
                 success.value = 'Google account linked successfully!'
                 googleLinked.value = true
-                console.log('Token saved, googleLinked set to true')
+                console.log('Token saved successfully, googleLinked set to true')
                 
                 // Unsubscribe after successful save
                 subscription?.unsubscribe()
@@ -403,7 +411,9 @@ export const useGoogleDrive = () => {
           ],
           queryParams: {
             access_type: 'offline',
-            prompt: 'consent'
+            prompt: 'consent',
+            // Force re-evaluation of permissions
+            auth_type: 'reauthenticate'
           }
         }
       })
