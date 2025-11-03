@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { h, resolveComponent, ref, reactive, watch, onMounted } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
-import { useDebounceFn } from '@vueuse/core'
 
 const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
@@ -20,18 +19,18 @@ interface GoogleDriveFile {
 
 const table = useTemplateRef('table')
 
-const { 
-  fetchGoogleDriveFiles,
-  files,
-  googleLinked,
-  loading: googleLoading,
+const {
   error,
   success,
+  loading: googleLoading,
+  files,
+  googleLinked,
+  isInitialized,
   checkGoogleLinked,
-  unlinkGoogle
+  linkGoogleAccount,
+  unlinkGoogle,
+  fetchGoogleDriveFiles
 } = useGoogleDrive()
-
-const { ingestGoogleDriveFileToSupabase } = useAddGoogleDriveFile()
 
 const client = useSupabaseClient()
 const toast = useToast()
@@ -42,10 +41,10 @@ const sorting = ref([{ id: 'createdTime', desc: true }])
 const pagination = reactive({ pageIndex: 0, pageSize: 20 })
 const filenameQuery = ref('')
 
-/** ---------- Import state ---------- **/
-const selectedGroupId = ref<string | null>(null)
-const importing = ref(false)
+/** ---------- UI state ---------- **/
+const linking = ref(false)
 const unlinking = ref(false)
+const initializing = ref(true)
 
 /** ---------- Bulk selection helpers ---------- **/
 function selectedRowIds(): string[] {
@@ -58,7 +57,41 @@ function getSelectedFiles(): GoogleDriveFile[] {
   return data.value.filter(f => ids.includes(f.id))
 }
 
-/** ---------- Columns ---------- **/
+/** ---------- Formatting helpers ---------- **/
+function prettyMime(mime?: string): string {
+  if (!mime) return '—'
+  if (mime.includes('pdf')) return 'PDF'
+  if (mime.includes('document')) return 'Document'
+  if (mime.includes('spreadsheet')) return 'Spreadsheet'
+  if (mime.includes('presentation')) return 'Presentation'
+  if (mime === 'image/png') return 'PNG Image'
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'JPEG Image'
+  if (mime.startsWith('image/')) return 'Image'
+  if (mime.startsWith('text/')) return 'Text'
+  if (mime === 'application/vnd.google-apps.folder') return 'Folder'
+  return mime
+}
+
+function formatSize(bytes?: number | null): string {
+  if (!bytes) return '—'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0, v = bytes
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(d)
+}
+
 function sortHeader(label: string, columnId: string) {
   return ({ column }: any) => {
     const isSorted = column.getIsSorted()
@@ -77,40 +110,7 @@ function sortHeader(label: string, columnId: string) {
   }
 }
 
-function prettyMime(mime?: string): string {
-  if (!mime) return '—'
-  if (mime.includes('pdf')) return 'PDF'
-  if (mime.includes('document')) return 'Document'
-  if (mime.includes('spreadsheet')) return 'Spreadsheet'
-  if (mime.includes('presentation')) return 'Presentation'
-  if (mime === 'image/png') return 'PNG Image'
-  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'JPEG Image'
-  if (mime.startsWith('image/')) return 'Image'
-  if (mime.startsWith('text/')) return 'Text'
-  if (mime === 'application/vnd.google-apps.folder') return 'Folder'
-  return mime
-}
-
-function formatSize(bytes?: number | null) {
-  if (!bytes) return '—'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0, v = bytes
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
-}
-
-function formatDate(iso?: string) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(d)
-}
-
+/** ---------- Table columns ---------- **/
 const columns: TableColumn<GoogleDriveFile>[] = [
   {
     id: 'select',
@@ -179,92 +179,32 @@ const columns: TableColumn<GoogleDriveFile>[] = [
   }
 ]
 
-/** ---------- Fetch ---------- **/
-const pending = ref(false)
-const fetchError = ref<string | null>(null)
+/** ---------- Event handlers ---------- **/
 
-const fetchGoogleFiles = async () => {
-  pending.value = true
-  fetchError.value = null
-  try {
-    const { data: { session } } = await client.auth.getSession()
-    if (session?.access_token) {
-      await fetchGoogleDriveFiles(session.access_token)
-      
-      // Filter by filename query if provided
-      let filtered = files.value
-      if (filenameQuery.value) {
-        filtered = files.value.filter(f => 
-          f.name.toLowerCase().includes(filenameQuery.value.toLowerCase())
-        )
-      }
-      
-      data.value = filtered as GoogleDriveFile[]
-    }
-  } catch (e: any) {
-    fetchError.value = e?.message || 'Failed to load files'
-  } finally {
-    pending.value = false
-  }
-}
-
-const debouncedFetch = useDebounceFn(fetchGoogleFiles, 150)
-watch([filenameQuery], () => {
-  pagination.pageIndex = 0
-  debouncedFetch()
-})
-
-/** ---------- Import handler ---------- **/
-async function handleImportToHypaThymesia() {
-  const selectedFiles = getSelectedFiles()
-  
-  if (!selectedFiles.length) {
-    toast.add({
-      title: 'No files selected',
-      description: 'Select files to import',
-      color: 'warning',
-      icon: 'i-lucide-alert-circle'
-    })
-    return
-  }
-
-  importing.value = true
-  let successCount = 0
-  let failureCount = 0
-
+async function handleLinkGoogle() {
+  linking.value = true
   try {
     const { data: { session } } = await client.auth.getSession()
     if (!session?.access_token) throw new Error('No session')
 
-    for (const file of selectedFiles) {
-      try {
-        await ingestGoogleDriveFileToSupabase(
-          session.access_token,
-          file,
-          selectedGroupId.value || undefined,
-          true
-        )
-        successCount++
-      } catch (e: any) {
-        console.error(`Failed to import ${file.name}:`, e)
-        failureCount++
-      }
-    }
-
-    // Deselect rows
-    table.value?.tableApi?.resetRowSelection?.()
-
+    // Trigger twice to ensure it works
+    await linkGoogleAccount(client, session.access_token)
+    
+    // Small delay then trigger again
+    await new Promise(resolve => setTimeout(resolve, 500))
+    await linkGoogleAccount(client, session.access_token)
+  } catch (err) {
     toast.add({
-      title: `Imported ${successCount} file(s)${failureCount ? `, ${failureCount} failed` : ''}`,
-      color: failureCount > 0 ? 'warning' : 'success',
-      icon: failureCount > 0 ? 'i-lucide-alert-triangle' : 'i-lucide-check'
+      title: 'Link failed',
+      description: error.value || 'Failed to link Google account',
+      color: 'error',
+      icon: 'i-lucide-alert-circle'
     })
   } finally {
-    importing.value = false
+    linking.value = false
   }
 }
 
-/** ---------- Unlink handler ---------- **/
 async function handleUnlinkGoogle() {
   unlinking.value = true
   try {
@@ -272,22 +212,19 @@ async function handleUnlinkGoogle() {
     if (!session?.access_token) throw new Error('No session')
 
     await unlinkGoogle(client, session.access_token)
-    
-    // Clear local state
     data.value = []
     filenameQuery.value = ''
-    
+
     toast.add({
-      title: 'Google account unlinked',
+      title: 'Unlinked',
       description: 'Your Google Drive connection has been removed',
       color: 'success',
       icon: 'i-lucide-check'
     })
-  } catch (e: any) {
-    console.error('Unlink error:', e)
+  } catch (err) {
     toast.add({
-      title: 'Failed to unlink',
-      description: e?.message || 'An error occurred',
+      title: 'Unlink failed',
+      description: error.value || 'Failed to unlink Google account',
       color: 'error',
       icon: 'i-lucide-alert-circle'
     })
@@ -296,72 +233,118 @@ async function handleUnlinkGoogle() {
   }
 }
 
-onMounted(async () => {
-  const { data: { session } } = await client.auth.getSession()
-  if (session?.access_token) {
-    // Check if already linked
-    await checkGoogleLinked(session.access_token)
+async function handleFetchFiles() {
+  try {
+    const { data: { session } } = await client.auth.getSession()
+    if (!session?.access_token) throw new Error('No session')
+
+    await fetchGoogleDriveFiles(session.access_token)
     
-    // If linked, fetch files
-    if (googleLinked.value) {
-      await fetchGoogleFiles()
+    // files.value is now a computed that returns mutable array
+    if (filenameQuery.value) {
+      data.value = files.value.filter(f =>
+        f.name.toLowerCase().includes(filenameQuery.value.toLowerCase())
+      )
+    } else {
+      data.value = files.value
     }
+
+    toast.add({
+      title: 'Files loaded',
+      description: `Found ${files.value.length} files`,
+      color: 'success',
+      icon: 'i-lucide-check'
+    })
+  } catch (err) {
+    toast.add({
+      title: 'Failed to load files',
+      description: error.value || 'An error occurred',
+      color: 'error',
+      icon: 'i-lucide-alert-circle'
+    })
+  }
+}
+
+/** ---------- Watch for search input ---------- **/
+watch([filenameQuery], () => {
+  pagination.pageIndex = 0
+  
+  if (!files.value.length) return
+  
+  if (filenameQuery.value) {
+    data.value = files.value.filter(f =>
+      f.name.toLowerCase().includes(filenameQuery.value.toLowerCase())
+    )
+  } else {
+    data.value = files.value
   }
 })
 
-function getRowId(row: GoogleDriveFile) { return row.id }
+/** ---------- Initialize on mount ---------- **/
+onMounted(async () => {
+  try {
+    const { data: { session } } = await client.auth.getSession()
+    if (session?.access_token) {
+      // Check if Google is linked
+      await checkGoogleLinked(session.access_token)
+      
+      // If linked, fetch files
+      if (googleLinked.value) {
+        await fetchGoogleDriveFiles(session.access_token)
+        data.value = files.value
+      }
+    }
+  } catch (err) {
+    console.error('Initialization error:', err)
+  } finally {
+    initializing.value = false
+  }
+})
+
+function getRowId(row: GoogleDriveFile) { 
+  return row.id 
+}
 </script>
 
 <template>
   <BodyCard>
     <div class="space-y-4">
+      <!-- Header -->
       <div class="flex items-center justify-between">
         <h1 class="font-semibold text-lg">Google Drive Files</h1>
-        <div v-if="!googleLinked" class="text-sm text-muted">
+        <div v-if="!googleLinked && isInitialized" class="text-sm text-muted">
           Link your Google account to browse files
         </div>
       </div>
 
-      <!-- Link/Unlink component -->
+      <!-- Link/Unlink Section -->
       <div class="border-b pb-4">
         <div v-if="!googleLinked" class="space-y-2">
-          <p class="text-sm text-gray-600">Connect your Google account to access your Drive files</p>
+          <p class="text-sm text-gray-600">
+            Connect your Google account to access your Drive files
+          </p>
           <UButton
-            @click="async () => {
-              const { data: { session } } = await client.auth.getSession()
-              if (session?.access_token) {
-                const { linkGoogleAccount } = useGoogleDrive()
-                await linkGoogleAccount(client, session.access_token)
-              }
-            }"
-            :loading="googleLoading"
+            @click="handleLinkGoogle"
+            :loading="linking"
             icon="i-lucide-chrome"
           >
             Link Google Account
           </UButton>
-          <UButton
-              @click="handleUnlinkGoogle"
-              :loading="unlinking"
-              :disabled="googleLoading"
-              variant="ghost"
-              icon="i-lucide-unlink"
-              color="red"
-            >
-              Unlink Google Account
-            </UButton>
         </div>
 
         <div v-else class="space-y-2">
           <div class="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
             <div class="flex items-center gap-2">
               <UIcon name="i-lucide-check-circle" class="text-green-600" />
-              <span class="text-sm font-medium text-green-700">Google account linked</span>
+              <span class="text-sm font-medium text-green-700">
+                Google account linked
+              </span>
             </div>
           </div>
 
           <div class="flex gap-2 flex-wrap">
             <UButton
-              @click="fetchGoogleFiles"
+              @click="handleFetchFiles"
               :loading="googleLoading"
               variant="soft"
               icon="i-lucide-refresh-ccw"
@@ -369,32 +352,23 @@ function getRowId(row: GoogleDriveFile) { return row.id }
               Refresh Files
             </UButton>
 
-            
-
-            <!-- Testing button - always visible -->
             <UButton
-              @click="async () => {
-                const { data: { session } } = await client.auth.getSession()
-                if (session?.access_token) {
-                  await unlinkGoogle(client, session.access_token)
-                }
-              }"
+              @click="handleUnlinkGoogle"
               :loading="unlinking"
               :disabled="googleLoading"
               variant="outline"
-              icon="i-lucide-bug"
-              color="amber"
-              size="sm"
-              class="text-xs"
+              icon="i-lucide-unlink"
+              color="red"
             >
-              [TEST] Direct Unlink
+              Unlink Google Account
             </UButton>
           </div>
         </div>
       </div>
 
-      <!-- Search and Import Controls -->
+      <!-- Files Section -->
       <div v-if="googleLinked" class="space-y-4">
+        <!-- Search -->
         <div class="flex items-center gap-2">
           <UInput
             v-model="filenameQuery"
@@ -403,39 +377,11 @@ function getRowId(row: GoogleDriveFile) { return row.id }
             class="flex-1"
           />
           <div class="text-sm text-muted whitespace-nowrap">
-            <span v-if="!googleLoading">Total: {{ files.length.toLocaleString() }}</span>
+            <span v-if="!googleLoading">
+              Total: {{ files.length.toLocaleString() }}
+            </span>
             <span v-else>Loading…</span>
           </div>
-        </div>
-
-        <!-- Import Control Bar -->
-        <div class="flex items-center gap-3 p-3 bg-muted/30 rounded-lg border border-accented">
-          <USelect
-            v-model="selectedGroupId"
-            placeholder="Select group (optional)…"
-            :options="[
-              { label: 'No Group', value: null },
-              { label: 'Test Group 1', value: 'test-1' },
-              { label: 'Test Group 2', value: 'test-2' }
-            ]"
-            value-key="value"
-            label-key="label"
-            class="flex-1"
-            :disabled="importing"
-            nullable
-          />
-          <div class="text-xs text-muted">
-            Selected: {{ selectedRowIds().length }} files
-          </div>
-          <UButton
-            @click="handleImportToHypaThymesia"
-            :loading="importing"
-            :disabled="selectedRowIds().length === 0"
-            color="success"
-            icon="i-lucide-download"
-          >
-            Import to Hypa-Thymesia
-          </UButton>
         </div>
 
         <!-- Files Table -->
@@ -454,13 +400,20 @@ function getRowId(row: GoogleDriveFile) { return row.id }
           :getRowId="getRowId"
           class="flex-1"
         >
-          <template #loading><div class="py-6 text-sm">Fetching files…</div></template>
-          <template #empty><div class="py-6 text-sm">Nothing to show.</div></template>
+          <template #loading>
+            <div class="py-6 text-sm">Fetching files…</div>
+          </template>
+          <template #empty>
+            <div class="py-6 text-sm">Nothing to show.</div>
+          </template>
         </UTable>
 
         <!-- Pagination -->
         <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
-          <div>Page {{ pagination.pageIndex + 1 }} • Showing {{ data.slice(pagination.pageIndex * pagination.pageSize, (pagination.pageIndex + 1) * pagination.pageSize).length }} / {{ data.length }}</div>
+          <div>
+            Page {{ pagination.pageIndex + 1 }} •
+            Showing {{ data.slice(pagination.pageIndex * pagination.pageSize, (pagination.pageIndex + 1) * pagination.pageSize).length }} / {{ data.length }}
+          </div>
           <UPagination
             :default-page="pagination.pageIndex + 1"
             :items-per-page="pagination.pageSize"
@@ -470,14 +423,6 @@ function getRowId(row: GoogleDriveFile) { return row.id }
         </div>
 
         <!-- Alerts -->
-        <UAlert
-          v-if="fetchError"
-          icon="i-lucide-alert-circle"
-          color="error"
-          :title="fetchError"
-          variant="subtle"
-          class="mt-4"
-        />
         <UAlert
           v-if="error"
           icon="i-lucide-alert-circle"

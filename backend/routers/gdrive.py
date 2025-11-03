@@ -1,67 +1,227 @@
+"""
+Google Drive OAuth Integration Router
+Handles linking, unlinking, and persistent access to Google Drive files
+with automatic token refresh and secure token storage.
+"""
+
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import os
 from supabase import create_client
 from core.security import get_current_user, AuthUser
 from core.config import get_settings
 
-router = APIRouter(tags=["google"])
+router = APIRouter( tags=["google"])
+
+# ============================================================================
+# Models
+# ============================================================================
 
 class GoogleTokenRequest(BaseModel):
+    """Request model for saving Google OAuth tokens"""
     access_token: str
     refresh_token: Optional[str] = None
     expires_at: Optional[str] = None
 
+
+class GoogleDriveFilesResponse(BaseModel):
+    """Response model for Google Drive files list"""
+    files: list
+    nextPageToken: Optional[str] = None
+
+
+# ============================================================================
+# Dependencies
+# ============================================================================
+
+def get_supabase_client():
+    """Get Supabase client instance"""
+    return create_client(
+        get_settings().SUPABASE_URL,
+        get_settings().SUPABASE_KEY
+    )
+
+
+def get_google_credentials():
+    """Get Google OAuth credentials from environment"""
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="Google credentials not configured"
+        )
+    
+    return {"client_id": client_id, "client_secret": client_secret}
+
+
+# ============================================================================
+# Token Management (Private)
+# ============================================================================
+
+def _get_stored_token(
+    user_id: str,
+    supabase_client,
+    provider: str = "google"
+):
+    """Retrieve the most recent stored token for a user"""
+    try:
+        response = supabase_client.table("user_oauth_tokens").select("*").eq(
+            "user_id", user_id
+        ).eq(
+            "provider", provider
+        ).order(
+            "created_at", desc=True
+        ).limit(1).execute()
+        
+        return response.data[0] if response.data else None
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+def _refresh_access_token(
+    refresh_token: str,
+    supabase_client,
+    user_id: str,
+    google_credentials: dict
+):
+    """
+    Refresh an expired access token using the refresh token.
+    Updates the database with the new token.
+    """
+    try:
+        token_url = "https://oauth2.googleapis.com/token"
+        payload = {
+            "client_id": google_credentials["client_id"],
+            "client_secret": google_credentials["client_secret"],
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+        
+        response = requests.post(token_url, data=payload, timeout=10)
+        
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to refresh Google token"
+            )
+        
+        token_data = response.json()
+        new_access_token = token_data.get("access_token")
+        expires_in = token_data.get("expires_in", 3600)
+        # Use timezone-aware datetime
+        expires_at = (datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(seconds=expires_in)).isoformat()
+        
+        # Update token in database
+        supabase_client.table("user_oauth_tokens").update({
+            "access_token": new_access_token,
+            "expires_at": expires_at
+        }).eq("user_id", user_id).eq("provider", "google").execute()
+        
+        return new_access_token
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to refresh token with Google"
+        )
+
+
+def _get_valid_access_token(
+    user_id: str,
+    supabase_client,
+    google_credentials: dict
+) -> str:
+    """
+    Get a valid Google access token, refreshing if necessary.
+    Returns the access token ready to use with Google APIs.
+    """
+    token_record = _get_stored_token(user_id, supabase_client)
+    
+    if not token_record or not token_record.get("access_token"):
+        raise HTTPException(
+            status_code=404,
+            detail="No Google account linked"
+        )
+    
+    access_token = token_record.get("access_token")
+    expires_at = token_record.get("expires_at")
+    refresh_token = token_record.get("refresh_token")
+    
+    # Check if token is expired or expiring soon (within 5 minutes)
+    if expires_at:
+        try:
+            # Parse expires_at, handling both naive and timezone-aware datetimes
+            if isinstance(expires_at, str):
+                expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            else:
+                expires_dt = expires_at
+            
+            # Make current time timezone-aware if expires_dt is aware
+            now = datetime.utcnow()
+            if expires_dt.tzinfo is not None:
+                from datetime import timezone
+                now = now.replace(tzinfo=timezone.utc)
+            
+            if now >= expires_dt - timedelta(minutes=5):
+                if not refresh_token:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Token expired and no refresh token available"
+                    )
+                
+                # Refresh the token
+                access_token = _refresh_access_token(
+                    refresh_token,
+                    supabase_client,
+                    user_id,
+                    google_credentials
+                )
+        except Exception as e:
+            # If datetime parsing fails, assume token is expired
+            if refresh_token:
+                access_token = _refresh_access_token(
+                    refresh_token,
+                    supabase_client,
+                    user_id,
+                    google_credentials
+                )
+            else:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token expired and no refresh token available"
+                )
+    
+    return access_token
+
+
+# ============================================================================
+# Public Routes
+# ============================================================================
+
 @router.post("/save-google-token")
 async def save_google_token(
     auth: AuthUser = Depends(get_current_user),
-    supabase_client = Depends(lambda: create_client(
-        get_settings().SUPABASE_URL,
-        get_settings().SUPABASE_KEY
-    )),
+    supabase_client=Depends(get_supabase_client),
     token_data: GoogleTokenRequest = Body(...)
 ):
-    """Save Google OAuth token to database - ensures only one token per user"""
+    """
+    Save Google OAuth token to database.
+    Replaces any existing token for the user (one token per user).
+    """
     try:
-        print(f"\n=== SAVING GOOGLE TOKEN ===")
-        print(f"User: {auth.id}")
-        print(f"Access token (first 30 chars): {token_data.access_token[:30]}...")
-        print(f"Access token length: {len(token_data.access_token)}")
-        print(f"Refresh token present: {bool(token_data.refresh_token)}")
-        if token_data.refresh_token:
-            print(f"Refresh token (FULL): {token_data.refresh_token}")
-            print(f"Refresh token length: {len(token_data.refresh_token)}")
-        else:
-            print("WARNING: No refresh token in request!")
-        print(f"Expires at: {token_data.expires_at}")
+        # Delete any existing tokens
+        supabase_client.table("user_oauth_tokens").delete().eq(
+            "user_id", auth.id
+        ).eq(
+            "provider", "google"
+        ).execute()
         
-        # First, check how many existing Google tokens exist
-        print(f"Checking for existing Google tokens for user {auth.id}...")
-        existing = supabase_client.table("user_oauth_tokens").select("id").eq("user_id", auth.id).eq("provider", "google").execute()
-        print(f"Found {len(existing.data) if existing.data else 0} existing tokens")
-        if existing.data:
-            for token in existing.data:
-                print(f"  - Existing token id: {token['id']}")
-        
-        # Delete ALL existing Google tokens for this user
-        print(f"Deleting all existing Google tokens...")
-        delete_response = supabase_client.table("user_oauth_tokens").delete().eq("user_id", auth.id).eq("provider", "google").execute()
-        print(f"Delete completed")
-        
-        # Verify deletion worked
-        print("Verifying old tokens are gone...")
-        verify = supabase_client.table("user_oauth_tokens").select("id").eq("user_id", auth.id).eq("provider", "google").execute()
-        print(f"After deletion, found {len(verify.data) if verify.data else 0} tokens remaining")
-        
-        if verify.data:
-            print(f"WARNING: Old tokens still exist! {[t['id'] for t in verify.data]}")
-        
-        # Now insert the new token
-        print("Inserting new Google token...")
-        response = supabase_client.table("user_oauth_tokens").insert({
+        # Insert new token
+        result = supabase_client.table("user_oauth_tokens").insert({
             "user_id": auth.id,
             "provider": "google",
             "access_token": token_data.access_token,
@@ -70,267 +230,143 @@ async def save_google_token(
             "token_type": "Bearer"
         }).execute()
         
-        new_id = response.data[0]['id'] if response.data else 'unknown'
-        print(f"New token inserted with id: {new_id}")
-        
-        # Log the saved token
-        if response.data:
-            saved = response.data[0]
-            print(f"Saved token details:")
-            print(f"  ID: {saved.get('id')}")
-            print(f"  Access token (first 30): {saved.get('access_token', '')[:30]}...")
-            print(f"  Refresh token (FULL): {saved.get('refresh_token')}")
-            print(f"  Expires at: {saved.get('expires_at')}")
-        
-        # Final verification - check we only have ONE token now
-        print("Final verification - checking total tokens...")
-        final = supabase_client.table("user_oauth_tokens").select("id").eq("user_id", auth.id).eq("provider", "google").execute()
-        print(f"Final count: {len(final.data) if final.data else 0} tokens")
-        if final.data:
-            for token in final.data:
-                print(f"  - Token id: {token['id']}")
-        
-        return {"success": True, "message": "Google token saved"}
-    except Exception as e:
-        print(f"Error saving Google token: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/google-drive-token")
-async def get_google_drive_token(
-    auth: AuthUser = Depends(get_current_user),
-    supabase_client = Depends(lambda: create_client(
-        get_settings().SUPABASE_URL,
-        get_settings().SUPABASE_KEY
-    ))
-):
-    """Retrieve Google OAuth token from database"""
-    try:
-        print(f"Retrieving Google token for user: {auth.id}")
-        
-        response = supabase_client.table("user_oauth_tokens").select("*").eq("user_id", auth.id).eq("provider", "google").order("created_at", desc=True).limit(1).execute()
-        
-        print(f"Retrieved data exists: {bool(response.data)}")
-        
-        if not response.data or len(response.data) == 0:
-            raise HTTPException(status_code=404, detail="Google access token not found")
-        
-        token_data = response.data[0]
-        token = token_data.get("access_token")
-        print(f"Token (first 20 chars): {token[:20] if token else 'N/A'}...")
-        
-        if not token:
-            raise HTTPException(status_code=404, detail="Google access token not found")
-        
         return {
-            "access_token": token,
-            "refresh_token": token_data.get("refresh_token"),
-            "expires_at": token_data.get("expires_at")
+            "success": True,
+            "message": "Token saved successfully"
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"Error retrieving Google token: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save token: {str(e)}"
+        )
 
-@router.post("/refresh-google-token")
-async def refresh_google_token(
-    auth: AuthUser = Depends(get_current_user),
-    supabase_client = Depends(lambda: create_client(
-        get_settings().SUPABASE_URL,
-        get_settings().SUPABASE_KEY
-    ))
-):
-    """Refresh expired Google OAuth token"""
-    print("=== refresh_google_token endpoint called ===")
-    try:
-        print(f"Refreshing Google token for user: {auth.id}")
-        
-        # Get credentials directly from environment
-        google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-        google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-        
-        print(f"Google client ID configured: {bool(google_client_id)}")
-        print(f"Google client secret configured: {bool(google_client_secret)}")
-        
-        if not google_client_id or not google_client_secret:
-            print("ERROR: Google credentials not configured")
-            raise HTTPException(status_code=500, detail="Google credentials not configured")
-        
-        # Get the stored token - order by created_at desc to get the most recent one
-        print("Querying database for most recent refresh token...")
-        response = supabase_client.table("user_oauth_tokens").select("*").eq("user_id", auth.id).eq("provider", "google").order("created_at", desc=True).limit(1).execute()
-        
-        print(f"Database query returned {len(response.data) if response.data else 0} rows")
-        
-        if not response.data or len(response.data) == 0 or not response.data[0].get("refresh_token"):
-            print("No refresh token found")
-            print(f"Response data: {response.data}")
-            raise HTTPException(status_code=404, detail="No refresh token found")
-        
-        # Get the first (most recent) result
-        token_row = response.data[0]
-        refresh_token = token_row["refresh_token"]
-        print(f"Found refresh token (first 20 chars): {refresh_token[:20]}...")
-        print(f"Refresh token length: {len(refresh_token)}")
-        print(f"Full refresh token for debugging: {refresh_token}")
-        
-        # Exchange refresh token for new access token
-        token_url = "https://oauth2.googleapis.com/token"
-        payload = {
-            "client_id": google_client_id,
-            "client_secret": google_client_secret,
-            "refresh_token": refresh_token,
-            "grant_type": "refresh_token"
-        }
-        
-        print("Sending refresh request to Google...")
-        print(f"Token URL: {token_url}")
-        token_response = requests.post(token_url, data=payload)
-        
-        print(f"Google response status: {token_response.status_code}")
-        
-        if token_response.status_code != 200:
-            print(f"Google refresh failed with status {token_response.status_code}")
-            print(f"Google response: {token_response.text}")
-            raise HTTPException(status_code=400, detail=f"Failed to refresh token: {token_response.text}")
-        
-        token_data = token_response.json()
-        print(f"Refresh successful, new token (first 20 chars): {token_data['access_token'][:20]}...")
-        
-        # Calculate proper expires_at timestamp
-        expires_in = token_data.get("expires_in", 3600)
-        expires_at = (datetime.utcnow() + timedelta(seconds=expires_in)).isoformat()
-        
-        # Update token in database
-        supabase_client.table("user_oauth_tokens").update({
-            "access_token": token_data["access_token"],
-            "expires_at": expires_at,
-            "updated_at": "now()"
-        }).eq("user_id", auth.id).eq("provider", "google").execute()
-        
-        print("Token updated in database")
-        return {"success": True, "message": "Token refreshed"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"ERROR in refresh_google_token: {type(e).__name__}: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/google-linked")
 async def check_google_linked(
     auth: AuthUser = Depends(get_current_user),
-    supabase_client = Depends(lambda: create_client(
-        get_settings().SUPABASE_URL,
-        get_settings().SUPABASE_KEY
-    ))
+    supabase_client=Depends(get_supabase_client)
 ):
-    """Check if user has Google linked"""
+    """Check if user has a Google account linked"""
     try:
-        response = supabase_client.table("user_oauth_tokens").select("id").eq("user_id", auth.id).eq("provider", "google").single().execute()
+        token_record = _get_stored_token(auth.id, supabase_client)
         
-        return {"linked": bool(response.data)}
+        return {
+            "linked": token_record is not None
+        }
     except Exception:
         return {"linked": False}
 
-@router.post("/revoke-google-token")
-async def revoke_google_token(
+
+@router.get("/google-drive-files")
+async def get_google_drive_files(
     auth: AuthUser = Depends(get_current_user),
-    supabase_client = Depends(lambda: create_client(
-        get_settings().SUPABASE_URL,
-        get_settings().SUPABASE_KEY
-    ))
+    supabase_client=Depends(get_supabase_client),
+    google_credentials: dict = Depends(get_google_credentials),
+    page_size: int = 100,
+    page_token: Optional[str] = None
 ):
-    """Revoke Google token to clear all permissions"""
+    """
+    Fetch files from user's Google Drive.
+    Automatically refreshes token if expired.
+    """
     try:
-        print(f"Revoking Google token for user: {auth.id}")
+        # Get valid access token (refreshes if needed)
+        access_token = _get_valid_access_token(
+            auth.id,
+            supabase_client,
+            google_credentials
+        )
         
-        # Get the stored token
-        response = supabase_client.table("user_oauth_tokens").select("*").eq("user_id", auth.id).eq("provider", "google").single().execute()
+        # Build query parameters
+        params = {
+            "pageSize": page_size,
+            "spaces": "drive",
+            "fields": "files(id,name,mimeType,createdTime,modifiedTime,webViewLink,size),nextPageToken",
+            "q": "trashed=false"
+        }
         
-        if not response.data or not response.data.get("access_token"):
-            print("No token found to revoke")
-            return {"success": False, "message": "No token found", "revoked": False}
+        if page_token:
+            params["pageToken"] = page_token
         
-        access_token = response.data["access_token"]
-        print(f"Found token to revoke (first 20 chars): {access_token[:20]}...")
+        # Call Google Drive API
+        response = requests.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10
+        )
         
-        # Revoke the token with Google
-        revoke_url = "https://oauth2.googleapis.com/revoke"
-        revoke_payload = {"token": access_token}
+        if response.status_code == 401:
+            raise HTTPException(
+                status_code=401,
+                detail="Google token invalid. Please relink your account."
+            )
         
-        print("Sending revoke request to Google...")
-        revoke_response = requests.post(revoke_url, data=revoke_payload)
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail="Failed to fetch files from Google Drive"
+            )
         
-        if revoke_response.status_code == 200:
-            print("Token successfully revoked with Google")
-            return {"success": True, "message": "Token revoked", "revoked": True}
-        else:
-            print(f"Google revoke returned status {revoke_response.status_code}: {revoke_response.text}")
-            # Still return success - token is invalidated even if revoke endpoint returns non-200
-            return {"success": True, "message": "Revoke sent to Google", "revoked": True}
-            
+        return response.json()
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error revoking Google token: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching files: {str(e)}"
+        )
+
 
 @router.delete("/unlink-google")
 async def unlink_google(
     auth: AuthUser = Depends(get_current_user),
-    supabase_client = Depends(lambda: create_client(
-        get_settings().SUPABASE_URL,
-        get_settings().SUPABASE_KEY
-    ))
+    supabase_client=Depends(get_supabase_client),
+    google_credentials: dict = Depends(get_google_credentials)
 ):
-    """Unlink Google account from Supabase auth and delete stored tokens"""
+    """
+    Unlink Google account from Supabase auth and delete stored tokens.
+    Revokes tokens with Google to clear permissions.
+    """
     try:
-        print(f"Unlinking Google for user: {auth.id}")
-        
-        # Step 1: Get the token FIRST (before deleting) - get the LATEST one
+        # Get the token before deleting it
+        token_record = _get_stored_token(auth.id, supabase_client)
         token_revoked = False
-        try:
-            print(f"Getting latest token for user {auth.id} to revoke...")
-            response = supabase_client.table("user_oauth_tokens").select("*").eq("user_id", auth.id).eq("provider", "google").order("created_at", desc=True).limit(1).execute()
-            
-            if response and response.data and len(response.data) > 0:
-                token_data = response.data[0]
-                print(f"Found token to potentially revoke (id: {token_data.get('id')})")
-                
-                # ONLY revoke the access token, NOT the refresh token
-                # If we revoke the refresh token, Google won't give us a new one on re-link
-                token_to_revoke = token_data.get("access_token")
-                
-                if token_to_revoke:
-                    revoke_url = "https://oauth2.googleapis.com/revoke"
-                    revoke_payload = {"token": token_to_revoke}
-                    
-                    print(f"Revoking ACCESS token (first 20 chars): {token_to_revoke[:20]}...")
-                    print("Sending revoke request to Google...")
-                    revoke_response = requests.post(revoke_url, data=revoke_payload, timeout=5)
-                    print(f"Google revoke response: {revoke_response.status_code}")
-                    token_revoked = True
-                else:
-                    print("No access token found to revoke")
-            else:
-                print("No token record found to revoke (token may already be deleted)")
-        except Exception as e:
-            print(f"Warning: Exception during token revoke: {str(e)}")
         
-        # Step 2: Delete from our custom oauth tokens table
-        try:
-            supabase_client.table("user_oauth_tokens").delete().eq("user_id", auth.id).eq("provider", "google").execute()
-            print("Deleted tokens from user_oauth_tokens table")
-        except Exception as e:
-            print(f"Warning: Failed to delete from user_oauth_tokens: {str(e)}")
+        if token_record:
+            access_token = token_record.get("access_token")
+            
+            # Revoke the access token with Google
+            if access_token:
+                try:
+                    revoke_url = "https://oauth2.googleapis.com/revoke"
+                    revoke_payload = {"token": access_token}
+                    
+                    revoke_response = requests.post(
+                        revoke_url,
+                        data=revoke_payload,
+                        timeout=5
+                    )
+                    
+                    token_revoked = revoke_response.status_code == 200
+                except Exception:
+                    # Even if revoke fails, continue with local cleanup
+                    pass
+        
+        # Delete tokens from database
+        supabase_client.table("user_oauth_tokens").delete().eq(
+            "user_id", auth.id
+        ).eq(
+            "provider", "google"
+        ).execute()
         
         return {
-            "success": True, 
-            "message": "Google account unlinked and token revoked",
+            "success": True,
+            "message": "Google account unlinked",
             "token_revoked": token_revoked
         }
     except Exception as e:
-        print(f"Error unlinking Google: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to unlink: {str(e)}"
+        )

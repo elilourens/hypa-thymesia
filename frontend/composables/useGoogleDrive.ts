@@ -1,407 +1,136 @@
-import { ref, readonly } from 'vue'
+import { ref, readonly, computed } from 'vue'
 
 interface GoogleDriveFile {
   id: string
   name: string
   mimeType?: string
-  [key: string]: any
+  createdTime?: string
+  modifiedTime?: string
+  webViewLink?: string
+  size?: number
 }
 
 export const useGoogleDrive = () => {
-  console.log('useGoogleDrive composable loaded')
+  // ========================================================================
+  // State
+  // ========================================================================
   
-  const error = ref('')
-  const success = ref('')
-  const loading = ref(false)
+  const error = ref<string>('')
+  const success = ref<string>('')
+  const loading = ref<boolean>(false)
   const files = ref<GoogleDriveFile[]>([])
-  const googleLinked = ref(false)
+  const googleLinked = ref<boolean>(false)
+  const hasCheckedLink = ref<boolean>(false)
 
-  const refreshGoogleToken = async (supabaseAccessToken: string) => {
-    try {
-      console.log('Attempting to refresh Google token...')
-      const response = await fetch('http://localhost:8000/api/v1/refresh-google-token', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseAccessToken}`,
-          'Content-Type': 'application/json'
-        }
-      })
+  // ========================================================================
+  // Computed
+  // ========================================================================
 
-      if (!response.ok) {
-        throw new Error('Failed to refresh Google token')
-      }
+  const isInitialized = computed(() => hasCheckedLink.value)
 
-      console.log('Token refreshed successfully')
-      return await response.json()
-    } catch (err) {
-      console.error('Refresh error:', err)
-      throw err
-    }
-  }
+  // ========================================================================
+  // Core Token Management
+  // ========================================================================
 
-  const getGoogleDriveToken = async (supabaseAccessToken: string) => {
-    try {
-      console.log('Getting Google token from backend...')
-      const response = await fetch('http://localhost:8000/api/v1/google-drive-token', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${supabaseAccessToken}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      console.log('Backend response status:', response.status)
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        console.log('Backend error:', errorData)
-        throw new Error(errorData.detail || 'Failed to retrieve Google token')
-      }
-
-      const data = await response.json()
-      console.log('Retrieved token successfully')
-      const { access_token } = data
-      return access_token
-    } catch (err) {
-      console.error('Error in getGoogleDriveToken:', err)
-      throw err
-    }
-  }
-
+  /**
+   * Save Google tokens to backend after linking.
+   * Called when user completes OAuth flow.
+   */
   const saveGoogleToken = async (
     supabaseAccessToken: string,
-    accessToken: string,
-    refreshToken?: string | null,
+    googleAccessToken: string,
+    refreshToken?: string,
     expiresAt?: string
-  ) => {
+  ): Promise<void> => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/save-google-token', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseAccessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          access_token: accessToken,
-          refresh_token: refreshToken || undefined,
-          expires_at: expiresAt
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to save Google token')
-      }
-
-      return await response.json()
-    } catch (err) {
-      throw err
-    }
-  }
-
-  const listGoogleDriveFiles = async (googleAccessToken: string, supabaseAccessToken: string, pageSize: number = 100, pageToken?: string): Promise<any> => {
-    try {
-      console.log('Calling Google Drive API...')
-      console.log('Token (first 30 chars):', googleAccessToken.substring(0, 30) + '...')
-      console.log('Token length:', googleAccessToken.length)
-      
-      const params = new URLSearchParams({
-        pageSize: pageSize.toString(),
-        spaces: 'drive',
-        fields: 'files(id,name,mimeType,createdTime,modifiedTime,webViewLink,size),nextPageToken',
-        q: 'trashed=false'
-      })
-      
-      if (pageToken) {
-        params.append('pageToken', pageToken)
-      }
-      
-      let response = await fetch(
-        `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
+      const response = await fetch(
+        'http://localhost:8000/api/v1/save-google-token',
         {
+          method: 'POST',
           headers: {
-            Authorization: `Bearer ${googleAccessToken}`
-          }
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            access_token: googleAccessToken,
+            refresh_token: refreshToken || undefined,
+            expires_at: expiresAt
+          })
         }
       )
 
-      console.log('Google API response status:', response.status)
-
-      // If we get 401 from Google, try refreshing the token
-      if (response.status === 401) {
-        console.log('Got 401 from Google, attempting refresh...')
-        try {
-          const refreshResult = await refreshGoogleToken(supabaseAccessToken)
-          console.log('Refresh successful')
-          
-          const newToken = await getGoogleDriveToken(supabaseAccessToken)
-          console.log('Got new token, retrying API call...')
-          
-          response = await fetch(
-            `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
-            {
-              headers: {
-                Authorization: `Bearer ${newToken}`
-              }
-            }
-          )
-          
-          console.log('Retry response status:', response.status)
-        } catch (refreshErr) {
-          console.log('Refresh failed:', refreshErr)
-          throw new Error('Token expired and refresh failed. Please relink your Google account.')
-        }
-      }
-
       if (!response.ok) {
-        const errorData = await response.json()
-        console.log('Google API error:', errorData)
-        throw new Error(`Failed to fetch Drive files: ${errorData.error?.message || 'Unknown error'}`)
+        throw new Error('Failed to save token')
       }
 
-      const filesData = await response.json()
-      console.log('Files retrieved:', filesData.files?.length || 0)
-      console.log('Has next page:', !!filesData.nextPageToken)
-      return filesData
+      googleLinked.value = true
     } catch (err) {
-      console.error('Error in listGoogleDriveFiles:', err)
       throw err
     }
   }
 
-  const fetchAllGoogleDriveFiles = async (supabaseAccessToken: string) => {
-    error.value = ''
-    success.value = ''
-    loading.value = true
-    files.value = []
+  // ========================================================================
+  // Link/Unlink Management
+  // ========================================================================
 
-    try {
-      console.log('Starting fetchAllGoogleDriveFiles...')
-      const googleToken = await getGoogleDriveToken(supabaseAccessToken)
-      console.log('Got Google token, now listing files...')
-      
-      let allFiles: GoogleDriveFile[] = []
-      let nextPageToken: string | undefined = undefined
-      let pageCount = 0
-
-      // Keep fetching pages until there are no more
-      do {
-        pageCount++
-        console.log(`Fetching page ${pageCount}...`)
-        
-        const filesData = await listGoogleDriveFiles(googleToken, supabaseAccessToken, 100, nextPageToken)
-        
-        allFiles = allFiles.concat(filesData.files || [])
-        nextPageToken = filesData.nextPageToken
-        
-        console.log(`Page ${pageCount}: got ${filesData.files?.length || 0} files (total: ${allFiles.length})`)
-      } while (nextPageToken)
-
-      files.value = allFiles
-      success.value = `Found ${allFiles.length} files in your Google Drive`
-      console.log('Success! Total files:', allFiles.length)
-      return allFiles
-    } catch (err: unknown) {
-      console.error('Final error:', err)
-      if (err instanceof Error) {
-        error.value = `Failed to access Google Drive: ${err.message}`
-      } else {
-        error.value = `Failed to access Google Drive: ${String(err)}`
-      }
-      return null
-    } finally {
-      loading.value = false
-    }
-  }
-
-  const checkGoogleLinked = async (supabaseAccessToken: string) => {
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/google-linked', {
-        headers: {
-          'Authorization': `Bearer ${supabaseAccessToken}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      const data = await response.json()
-      googleLinked.value = data.linked
-      return data.linked
-    } catch (err) {
-      console.error('Error checking Google link status:', err)
-      googleLinked.value = false
-      return false
-    }
-  }
-
-  const unlinkGoogle = async (client: any, supabaseAccessToken: string) => {
-    error.value = ''
-    success.value = ''
-    
-    try {
-      console.log('=== Starting Google unlink process ===')
-      
-      // Step 1: Get user identities from Supabase Auth
-      console.log('Retrieving user identities...')
-      const result = await client.auth.getUserIdentities()
-      console.log('getUserIdentities result:', result)
-      console.log('Result type:', typeof result)
-      console.log('Is array:', Array.isArray(result))
-      
-      // Handle different response formats - Supabase returns { data: { identities: [...] }, error: null }
-      let identities: any[] = []
-      
-      // First priority: result.data.identities (the actual Supabase format)
-      if (result?.data?.identities && Array.isArray(result.data.identities)) {
-        identities = result.data.identities
-      }
-      // Fallback: direct array
-      else if (Array.isArray(result)) {
-        identities = result
-      }
-      // Fallback: result.data is array
-      else if (result?.data && Array.isArray(result.data)) {
-        identities = result.data
-      }
-      // Fallback: result.identities is array
-      else if (result?.identities && Array.isArray(result.identities)) {
-        identities = result.identities
-      }
-      
-      console.log('Processed identities:', identities)
-      console.log('Identities length:', identities.length)
-      
-      // Log each identity in detail
-      identities.forEach((identity: any, index: number) => {
-        console.log(`Identity ${index}:`, {
-          provider: identity.provider,
-          id: identity.id,
-          user_id: identity.user_id,
-          keys: Object.keys(identity)
-        })
-      })
-      
-      console.log('All provider names:', identities.map((i: any) => i.provider))
-      
-      // Step 2: Find the Google identity
-      const googleIdentity = identities.find((identity: any) => {
-        console.log(`Checking identity with provider: "${identity.provider}" against "google"`)
-        return identity.provider === 'google'
-      })
-      
-      if (!googleIdentity) {
-        console.log('Google identity not found. Available providers:', identities.map((i: any) => i.provider).join(', '))
-        throw new Error(`No Google identity found to unlink. Available: ${identities.map((i: any) => i.provider).join(', ')}`)
-      }
-      
-      console.log('Found Google identity, unlinking...')
-      
-      // Step 3: Unlink the Google identity from Supabase
-      const { error: unlinkError } = await client.auth.unlinkIdentity(googleIdentity)
-      
-      if (unlinkError) {
-        throw new Error(unlinkError.message)
-      }
-      
-      console.log('Successfully unlinked Google identity from Supabase Auth')
-      
-      // Step 4: Delete tokens from our backend database and revoke with Google
-      console.log('Deleting stored tokens from backend and revoking with Google...')
-      const response = await fetch('http://localhost:8000/api/v1/unlink-google', {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${supabaseAccessToken}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to delete tokens from backend')
-      }
-
-      const unlinkResult = await response.json()
-      console.log('Backend response:', unlinkResult)
-      console.log('Successfully deleted tokens from backend and revoked with Google')
-      googleLinked.value = false
-      success.value = 'Google account unlinked successfully'
-      console.log('=== Google unlink completed successfully ===')
-      
-      return unlinkResult
-    } catch (err) {
-      console.error('unlinkGoogle error:', err)
-      if (err instanceof Error) {
-        error.value = `Failed to unlink: ${err.message}`
-      } else {
-        error.value = 'Failed to unlink Google account'
-      }
-      throw err
-    }
-  }
-
-  const linkGoogleAccount = async (client: any, supabaseAccessToken: string) => {
-    console.log('=== linkGoogleAccount called ===')
+  /**
+   * Link a new Google account via OAuth.
+   * Sets up listener for OAuth tokens and initiates Supabase link flow.
+   */
+  const linkGoogleAccount = async (
+    supabaseClient: any,
+    supabaseAccessToken: string
+  ): Promise<void> => {
     error.value = ''
     success.value = ''
 
     try {
       let subscription: any
 
-      // Set up auth state change listener BEFORE initiating the link
-      const { data } = client.auth.onAuthStateChange(
+      // Listen for auth state changes when linking
+      const { data } = supabaseClient.auth.onAuthStateChange(
         async (event: string, session: any) => {
-          console.log('Auth state changed:', event)
-          console.log('Session provider_token exists:', !!session?.provider_token)
-          console.log('Session provider_refresh_token exists:', !!session?.provider_refresh_token)
-          
-          // When linking an identity (not signing in), we get USER_UPDATED or INITIAL_SESSION
-          // Check for provider_token presence rather than specific event
+          // When linking (not signing in), we get provider_token in the session
           if (session?.provider_token) {
-            console.log('Captured provider token from auth state change')
-            console.log('Event type:', event)
-            console.log('Has refresh token:', !!session.provider_refresh_token)
-            
             try {
-              const { data: { session: currentSession } } = await client.auth.getSession()
-              
-              if (currentSession?.access_token) {
-                const expiresAt = session.expires_at 
-                  ? new Date(session.expires_at * 1000).toISOString() 
-                  : undefined
-                
-                console.log('Saving Google token with:')
-                console.log('- Supabase access token (first 20 chars):', currentSession.access_token.substring(0, 20) + '...')
-                console.log('- Google access token (first 20 chars):', session.provider_token.substring(0, 20) + '...')
-                console.log('- Refresh token present:', !!session.provider_refresh_token)
-                console.log('- Expires at:', expiresAt)
-                
-                await saveGoogleToken(
-                  currentSession.access_token,
-                  session.provider_token,
-                  session.provider_refresh_token || undefined,
-                  expiresAt
-                )
-                
-                success.value = 'Google account linked successfully!'
-                googleLinked.value = true
-                console.log('Token saved successfully, googleLinked set to true')
-                
-                // Unsubscribe after successful save
-                subscription?.unsubscribe()
-              } else {
-                throw new Error('No current session access token')
+              const { data: { session: currentSession } } = 
+                await supabaseClient.auth.getSession()
+
+              if (!currentSession?.access_token) {
+                throw new Error('No session access token')
               }
+
+              // Calculate expiration time
+              const expiresAt = session.expires_at
+                ? new Date(session.expires_at * 1000).toISOString()
+                : undefined
+
+              // Save tokens to backend
+              await saveGoogleToken(
+                currentSession.access_token,
+                session.provider_token,
+                session.provider_refresh_token,
+                expiresAt
+              )
+
+              success.value = 'Google account linked successfully!'
+              googleLinked.value = true
+
+              // Clean up listener
+              subscription?.unsubscribe()
             } catch (err) {
-              console.error('Failed to save token:', err)
               error.value = 'Linked but failed to save token. Please try again.'
               subscription?.unsubscribe()
+              throw err
             }
           }
         }
       )
-      
+
       subscription = data.subscription
 
-      // Now initiate the link
-      const { error: linkError } = await client.auth.linkIdentity({
+      // Initiate the OAuth link with Supabase
+      const { error: linkError } = await supabaseClient.auth.linkIdentity({
         provider: 'google',
         options: {
           redirectTo: `${window.location.origin}/dashboard/link`,
@@ -410,117 +139,221 @@ export const useGoogleDrive = () => {
             'https://www.googleapis.com/auth/drive.metadata.readonly'
           ],
           queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-            // Force re-evaluation of permissions
-            auth_type: 'reauthenticate'
+            access_type: 'offline', // Request refresh token
+            //prompt: 'consent'
           }
         }
       })
 
       if (linkError) {
-        console.error('linkIdentity error:', linkError)
         error.value = linkError.message
         subscription?.unsubscribe()
+        throw linkError
       }
     } catch (err) {
-      console.error('linkGoogleAccount error:', err)
-      error.value = 'An error occurred while linking your account'
+      if (!(err instanceof Error) || !error.value) {
+        error.value = 'Failed to link Google account'
+      }
+      throw err
     }
-    
-    console.log('=== linkGoogleAccount finished ===')
   }
 
-  return {
-    error: readonly(error),
-    success: readonly(success),
-    loading: readonly(loading),
-    files: readonly(files),
-    googleLinked: readonly(googleLinked),
-    getGoogleDriveToken,
-    saveGoogleToken,
-    listGoogleDriveFiles,
-    fetchGoogleDriveFiles: fetchAllGoogleDriveFiles,
-    checkGoogleLinked,
-    unlinkGoogle,
-    refreshGoogleToken,
-    linkGoogleAccount
-  }
-}
-
-export const useAddGoogleDriveFile = () => {
-  const loading = ref(false)
-  const error = ref('')
-  const success = ref('')
-
-  const ingestGoogleDriveFileToSupabase = async (
-    supabaseAccessToken: string,
-    file: {
-      id: string
-      name: string
-      mimeType?: string
-      size?: number
-      webViewLink?: string
-    },
-    groupId?: string,
-    extractDeepEmbeds: boolean = true
-  ) => {
-    loading.value = true
+  /**
+   * Unlink Google account from both Supabase Auth and backend storage.
+   * Revokes tokens with Google.
+   */
+  const unlinkGoogle = async (
+    supabaseClient: any,
+    supabaseAccessToken: string
+  ): Promise<void> => {
     error.value = ''
     success.value = ''
 
     try {
-      console.log('Ingesting Google Drive file to Supabase:', file.name)
+      // Get user identities from Supabase Auth
+      const identitiesResult = await supabaseClient.auth.getUserIdentities()
 
-      // FIX: Better size handling with warnings
-      const fileSizeBytes = file.size ?? 0
-      if (!file.size) {
-        console.warn(`File "${file.name}" has no size metadata from Google Drive, using 0`)
+      // Handle different response formats from Supabase SDK
+      let identities: any[] = []
+      if (identitiesResult?.data?.identities) {
+        identities = identitiesResult.data.identities
+      } else if (Array.isArray(identitiesResult)) {
+        identities = identitiesResult
+      } else if (identitiesResult?.identities) {
+        identities = identitiesResult.identities
       }
 
-      const response = await fetch('http://localhost:8000/api/v1/ingest-google-drive-file', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseAccessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          google_drive_id: file.id,
-          google_drive_url: file.webViewLink || '',
-          filename: file.name,
-          mime_type: file.mimeType || 'application/octet-stream',
-          size_bytes: fileSizeBytes,
-          group_id: groupId || null,
-          extract_deep_embeds: extractDeepEmbeds
-        })
-      })
+      // Find the Google identity
+      const googleIdentity = identities.find(
+        (id: any) => id.provider === 'google'
+      )
+
+      if (!googleIdentity) {
+        throw new Error('No Google identity found to unlink')
+      }
+
+      // Unlink from Supabase Auth
+      const { error: unlinkError } = await supabaseClient.auth.unlinkIdentity(
+        googleIdentity
+      )
+
+      if (unlinkError) {
+        throw new Error(unlinkError.message)
+      }
+
+      // Delete tokens from backend and revoke with Google
+      const response = await fetch(
+        'http://localhost:8000/api/v1/unlink-google',
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
 
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to ingest file')
+        throw new Error(errorData.detail || 'Failed to unlink')
+      }
+
+      googleLinked.value = false
+      success.value = 'Google account unlinked successfully'
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      error.value = `Failed to unlink: ${message}`
+      throw err
+    }
+  }
+
+  // ========================================================================
+  // File Fetching
+  // ========================================================================
+
+  /**
+   * Check if user has Google account linked.
+   * Run this on app mount to restore state.
+   */
+  const checkGoogleLinked = async (
+    supabaseAccessToken: string
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch(
+        'http://localhost:8000/api/v1/google-linked',
+        {
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      const data = await response.json()
+      googleLinked.value = data.linked
+      hasCheckedLink.value = true
+      return data.linked
+    } catch (err) {
+      console.error('Error checking Google link:', err)
+      hasCheckedLink.value = true
+      return false
+    }
+  }
+
+  /**
+   * Fetch files from Google Drive with pagination support.
+   * Backend automatically handles token refresh.
+   */
+  const fetchGoogleDriveFiles = async (
+    supabaseAccessToken: string,
+    pageSize: number = 100,
+    pageToken?: string
+  ): Promise<{ files: GoogleDriveFile[], nextPageToken?: string }> => {
+    error.value = ''
+    success.value = ''
+    loading.value = true
+
+    try {
+      const params = new URLSearchParams({
+        page_size: pageSize.toString()
+      })
+
+      if (pageToken) {
+        params.append('page_token', pageToken)
+      }
+
+      const response = await fetch(
+        `http://localhost:8000/api/v1/google-drive-files?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      if (response.status === 401) {
+        error.value = 'Google token expired. Attempting to relink...'
+        googleLinked.value = false
+        
+        // Auto-retry link to refresh token
+        try {
+          const supabaseClient = useSupabaseClient()
+          await linkGoogleAccount(supabaseClient, supabaseAccessToken)
+          
+          // Wait a moment then retry the fetch
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          return fetchGoogleDriveFiles(supabaseAccessToken, pageSize, pageToken)
+        } catch (linkErr) {
+          throw new Error('Token expired and relink failed. Please link manually.')
+        }
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to fetch files')
       }
 
       const data = await response.json()
-      success.value = `Successfully ingested "${file.name}" (${data.text_chunks_ingested} chunks${data.images_extracted ? `, ${data.images_extracted} images` : ''})`
-      console.log('File ingested:', data)
-      return data
-    } catch (err) {
-      console.error('Error ingesting Google Drive file:', err)
-      if (err instanceof Error) {
-        error.value = `Failed to ingest file: ${err.message}`
-      } else {
-        error.value = 'Failed to ingest Google Drive file'
+      const filesList = data.files || []
+      
+      files.value = filesList
+      success.value = `Found ${filesList.length} files in your Google Drive`
+      
+      return {
+        files: filesList,
+        nextPageToken: data.nextPageToken
       }
-      throw err
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      error.value = `Failed to fetch Google Drive files: ${message}`
+      return { files: [] }
     } finally {
       loading.value = false
     }
   }
 
+  // ========================================================================
+  // Public API
+  // ========================================================================
+
   return {
-    loading: readonly(loading),
-    error: readonly(error),
-    success: readonly(success),
-    ingestGoogleDriveFileToSupabase
+    // State (as computed to avoid readonly issues)
+    error: computed(() => error.value),
+    success: computed(() => success.value),
+    loading: computed(() => loading.value),
+    files: computed(() => [...files.value]), // Spread to ensure mutability
+    googleLinked: computed(() => googleLinked.value),
+    
+    // Computed
+    isInitialized: computed(() => hasCheckedLink.value),
+
+    // Methods
+    checkGoogleLinked,
+    linkGoogleAccount,
+    unlinkGoogle,
+    fetchGoogleDriveFiles,
+    saveGoogleToken
   }
 }
