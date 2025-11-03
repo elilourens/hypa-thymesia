@@ -1,4 +1,3 @@
-# app/api/routes/storage.py
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from core.security import get_current_user, AuthUser
@@ -19,25 +18,41 @@ def get_signed_url(
     
     Handles:
     - Supabase files: bucket="images", path="..."
-    - Google Drive files: bucket="google-drive", path="google-drive/{FILE_ID}"
+    - Google Drive files: bucket="google-drive", path="google-drive/{FILE_ID}/{FILENAME}"
+    
+    For Google Drive files, returns:
+    - Thumbnail URL for image previews (works in <img> tags)
+    - Preview URL for opening in browser
+    - Download URL for direct download
     """
     logger.info(f"Getting signed URL for: bucket={bucket}, path={path}")
     
     try:
         # Handle Google Drive files
         if bucket == "google-drive" or path.startswith("google-drive/"):
-            logger.info(f"Detected Google Drive file, extracting file ID from path")
+            logger.info(f"Detected Google Drive file, extracting file ID from path: {path}")
             
             # Extract Google Drive file ID from path
-            file_id = path.replace("google-drive/", "")
+            # Path format: google-drive/{FILE_ID}/{FILENAME}
+            # We need to extract just the FILE_ID (first part after google-drive/)
+            parts = path.replace("google-drive/", "").split("/")
+            file_id = parts[0] if parts else None
+            
             if not file_id:
+                logger.error(f"Could not extract file ID from path: {path}")
                 raise ValueError("No file ID in Google Drive path")
             
-            logger.info(f"Generating Google Drive preview URL for: {file_id}")
+            logger.info(f"Extracted Google Drive file ID: {file_id}")
             
-            # Return Google Drive thumbnail preview URL
-            preview_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w400"
-            return {"signed_url": preview_url}
+            # Return Google Drive thumbnail URL for image previews
+            # This works directly in <img> tags without authentication
+            thumbnail_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w400"
+            logger.info(f"Returning Google Drive thumbnail URL: {thumbnail_url}")
+            return {
+                "signed_url": thumbnail_url,
+                "provider": "google_drive",
+                "file_id": file_id
+            }
         
         # Handle regular Supabase files
         logger.info(f"Generating Supabase signed URL for bucket: {bucket}, path: {path}")
@@ -49,7 +64,10 @@ def get_signed_url(
             raise HTTPException(500, detail="Supabase did not return a signed URL.")
         
         logger.info(f"Generated signed URL successfully for: {path}")
-        return {"signed_url": signed_url}
+        return {
+            "signed_url": signed_url,
+            "provider": "supabase"
+        }
         
     except HTTPException:
         raise

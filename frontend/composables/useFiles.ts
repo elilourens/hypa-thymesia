@@ -96,6 +96,15 @@ export function useFilesApi() {
   }
 
   /**
+   * Extract Google Drive file ID from path.
+   * Path format: google-drive/{FILE_ID}/{FILENAME}
+   */
+  function extractGoogleDriveFileId(path: string): string | null {
+    const parts = path.replace('google-drive/', '').split('/')
+    return parts[0] || null
+  }
+
+  /**
    * Get a signed URL for one file.
    * Handles both Supabase and Google Drive files.
    */
@@ -103,19 +112,8 @@ export function useFilesApi() {
     const headers = await authHeaders()
     
     try {
-      // Check if this is a Google Drive file BEFORE making the request
-      if (bucket === 'google-drive' || path.startsWith('google-drive/')) {
-        // For Google Drive, extract the file ID and return preview URL directly
-        const fileId = path.replace('google-drive/', '')
-        if (fileId) {
-          const previewUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
-          console.log('Using Google Drive preview URL:', previewUrl)
-          return previewUrl
-        }
-      }
-
-      // For Supabase files, call the backend endpoint
-      const res = await $fetch<{ signed_url: string; provider: string }>(
+      // Call the backend endpoint - it will handle both Supabase and Google Drive
+      const res = await $fetch<{ signed_url: string; provider?: string }>(
         `${API_BASE}/storage/signed-url`,
         { 
           method: 'GET', 
@@ -135,5 +133,23 @@ export function useFilesApi() {
     }
   }
 
-  return { listFiles, getSignedUrl }
+  /**
+   * Get a thumbnail URL for Google Drive files.
+   * Returns either a Google Drive thumbnail or a signed URL for Supabase files.
+   */
+  async function getThumbnailUrl(bucket: string, path: string, mimeType?: string): Promise<string> {
+    // For Google Drive files, use the thumbnail endpoint
+    if (bucket === 'google-drive' || path.startsWith('google-drive/')) {
+      const fileId = extractGoogleDriveFileId(path)
+      if (fileId) {
+        // Google Drive thumbnail - works directly in img tags
+        return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
+      }
+    }
+    
+    // For regular files, use signed URL
+    return getSignedUrl(bucket, path)
+  }
+
+  return { listFiles, getSignedUrl, getThumbnailUrl }
 }

@@ -1,4 +1,4 @@
-// 👇 move the interface outside the function
+//  move the interface outside the function
 export interface ChatMsg {
   id: string
   role: 'user' | 'assistant'

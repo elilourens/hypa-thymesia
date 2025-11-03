@@ -334,6 +334,46 @@ export const useGoogleDrive = () => {
     }
   }
 
+  /**
+   * Ingest a Google Drive file using the backend API.
+   * Downloads and processes the file.
+   */
+  const ingestGoogleDriveFile = async (
+    supabaseAccessToken: string,
+    fileData: {
+      google_drive_id: string
+      google_drive_url: string
+      filename: string
+      mime_type: string
+      size_bytes: number
+      extract_deep_embeds?: boolean
+    }
+  ): Promise<any> => {
+    try {
+      const response = await fetch(
+        'http://localhost:8000/api/v1/ingest-google-drive-file',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(fileData)
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to ingest file')
+      }
+
+      return await response.json()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      throw new Error(`Failed to ingest Google Drive file: ${message}`)
+    }
+  }
+
   // ========================================================================
   // Public API
   // ========================================================================
@@ -354,6 +394,7 @@ export const useGoogleDrive = () => {
     linkGoogleAccount,
     unlinkGoogle,
     fetchGoogleDriveFiles,
-    saveGoogleToken
+    saveGoogleToken,
+    ingestGoogleDriveFile
   }
 }

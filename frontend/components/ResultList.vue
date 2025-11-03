@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useFilesApi } from '~/composables/useFiles'
-const { getSignedUrl } = useFilesApi()
+const { getSignedUrl, getThumbnailUrl } = useFilesApi()
 const toast = useToast()
 
 const props = defineProps<{ results: any[], deleting?: boolean }>()
@@ -45,23 +45,13 @@ function buildDeepLink(baseUrl: string, r: any) {
   return baseUrl
 }
 
-// Generate Google Drive preview URL
-function getGoogleDrivePreviewUrl(fileId: string): string {
-  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
-}
-
-// Generate Google Drive embed URL for viewing
-function getGoogleDriveViewUrl(fileId: string): string {
-  return `https://drive.google.com/file/d/${fileId}/preview`
-}
-
 // ========== Actions ==========
 
 async function handleOpen(r: any) {
   try {
     // Check if this is a Google Drive file
     if (r.metadata?.storage_provider === 'google_drive' && r.metadata?.external_id) {
-      const viewUrl = getGoogleDriveViewUrl(r.metadata.external_id)
+      const viewUrl = `https://drive.google.com/file/d/${r.metadata.external_id}/preview`
       window.open(viewUrl, '_blank')
       return
     }
@@ -99,9 +89,9 @@ async function handleDownload(r: any) {
   }
 }
 
-// ========== Auto Fetch Signed URLs for Images ==========
+// ========== Auto Fetch Thumbnail URLs for Images ==========
 
-// whenever results change, populate missing signed URLs
+// whenever results change, populate missing thumbnail URLs
 watch(
   () => props.results,
   async (newResults) => {
@@ -109,21 +99,17 @@ watch(
     for (const r of newResults) {
       const modality = (r.metadata?.modality || '').toLowerCase()
       
-      // For Google Drive files, use preview URL directly (no backend call needed)
-      if (r.metadata?.storage_provider === 'google_drive') {
-        if (r.metadata?.external_id && !r.metadata?.signed_url) {
-          r.metadata.signed_url = getGoogleDrivePreviewUrl(r.metadata.external_id)
-        }
-        continue
-      }
-      
-      // For regular files, fetch signed URL from backend
+      // For images, fetch thumbnail URL
       if (modality === 'image' && !r.metadata?.signed_url) {
         try {
-          const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
+          const url = await getThumbnailUrl(
+            r.metadata.bucket, 
+            r.metadata.storage_path,
+            r.metadata.mime_type
+          )
           if (url) r.metadata.signed_url = url
         } catch (err) {
-          console.error('Failed to sign URL for', r.metadata.storage_path, err)
+          console.error('Failed to get thumbnail URL for', r.metadata.storage_path, err)
         }
       }
     }

@@ -29,7 +29,8 @@ const {
   checkGoogleLinked,
   linkGoogleAccount,
   unlinkGoogle,
-  fetchGoogleDriveFiles
+  fetchGoogleDriveFiles,
+  ingestGoogleDriveFile
 } = useGoogleDrive()
 
 const client = useSupabaseClient()
@@ -45,6 +46,8 @@ const filenameQuery = ref('')
 const linking = ref(false)
 const unlinking = ref(false)
 const initializing = ref(true)
+const importing = ref(false)
+const importProgress = ref<{ current: number, total: number } | null>(null)
 
 /** ---------- Bulk selection helpers ---------- **/
 function selectedRowIds(): string[] {
@@ -265,6 +268,117 @@ async function handleFetchFiles() {
   }
 }
 
+/** ---------- Import handler ---------- **/
+async function handleImportFiles() {
+  const selectedFiles = getSelectedFiles()
+  
+  if (selectedFiles.length === 0) {
+    toast.add({
+      title: 'No files selected',
+      description: 'Please select at least one file to import',
+      color: 'error',
+      icon: 'i-lucide-alert-triangle'
+    })
+    return
+  }
+
+  importing.value = true
+  importProgress.value = { current: 0, total: selectedFiles.length }
+
+  try {
+    const { data: { session } } = await client.auth.getSession()
+    if (!session?.access_token) throw new Error('No session')
+
+    let successful = 0
+    let failed = 0
+    const failedFiles: string[] = []
+
+    for (const file of selectedFiles) {
+      try {
+        importProgress.value.current++
+
+        // Check if file type is supported
+        const supportedExtensions = ['pdf', 'docx', 'pptx', 'txt', 'md', 'png', 'jpeg', 'jpg', 'webp']
+        const supportedMimeTypes = [
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'text/plain',
+          'text/markdown',
+          'image/png',
+          'image/jpeg',
+          'image/webp'
+        ]
+
+        const isSupported = file.mimeType && (
+          supportedMimeTypes.includes(file.mimeType) ||
+          supportedExtensions.some(ext => file.mimeType?.includes(ext) ?? false)
+        )
+
+        if (!isSupported) {
+          failedFiles.push(`${file.name} (unsupported type)`)
+          failed++
+          continue
+        }
+
+        // Call the ingest method from composable
+        await ingestGoogleDriveFile(
+          session.access_token,
+          {
+            google_drive_id: file.id,
+            google_drive_url: `https://drive.google.com/file/d/${file.id}/view`,
+            filename: file.name,
+            mime_type: file.mimeType || 'application/octet-stream',
+            size_bytes: file.size || 0,
+            extract_deep_embeds: true
+          }
+        )
+
+        successful++
+      } catch (err) {
+        failedFiles.push(`${file.name} (${err instanceof Error ? err.message : 'unknown error'})`)
+        failed++
+      }
+    }
+
+    importProgress.value = null
+
+    // Show results
+    if (successful > 0) {
+      toast.add({
+        title: `${successful} file${successful !== 1 ? 's' : ''} imported`,
+        description: `Successfully added to Hypa-Thymesia`,
+        color: 'success',
+        icon: 'i-lucide-check'
+      })
+    }
+
+    if (failed > 0) {
+      toast.add({
+        title: `${failed} file${failed !== 1 ? 's' : ''} failed`,
+        description: failedFiles.slice(0, 3).join(', ') + (failedFiles.length > 3 ? ` +${failedFiles.length - 3} more` : ''),
+        color: 'error',
+        icon: 'i-lucide-alert-circle'
+      })
+    }
+
+    // Clear selection after import
+    if (successful > 0) {
+      table?.value?.tableApi?.resetRowSelection()
+    }
+  } catch (err) {
+    toast.add({
+      title: 'Import failed',
+      description: err instanceof Error ? err.message : 'An error occurred',
+      color: 'error',
+      icon: 'i-lucide-alert-circle'
+    })
+  } finally {
+    importing.value = false
+    importProgress.value = null
+  }
+}
+
 /** ---------- Watch for search input ---------- **/
 watch([filenameQuery], () => {
   pagination.pageIndex = 0
@@ -368,7 +482,7 @@ function getRowId(row: GoogleDriveFile) {
 
       <!-- Files Section -->
       <div v-if="googleLinked" class="space-y-4">
-        <!-- Search -->
+        <!-- Search and Import Bar -->
         <div class="flex items-center gap-2">
           <UInput
             v-model="filenameQuery"
@@ -382,6 +496,27 @@ function getRowId(row: GoogleDriveFile) {
             </span>
             <span v-else>Loading…</span>
           </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="flex items-center justify-between gap-2">
+          <div class="text-sm text-muted">
+            {{ selectedRowIds().length }} selected
+          </div>
+          <UButton
+            @click="handleImportFiles"
+            :loading="importing"
+            :disabled="selectedRowIds().length === 0 || googleLoading"
+            color="primary"
+            icon="i-lucide-download"
+          >
+            <span v-if="!importProgress">
+              Import to Hypa-Thymesia
+            </span>
+            <span v-else>
+              Importing ({{ importProgress.current }}/{{ importProgress.total }})
+            </span>
+          </UButton>
         </div>
 
         <!-- Files Table -->
