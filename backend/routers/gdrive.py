@@ -140,17 +140,17 @@ def _get_valid_access_token(
     Returns the access token ready to use with Google APIs.
     """
     token_record = _get_stored_token(user_id, supabase_client)
-    
+
     if not token_record or not token_record.get("access_token"):
         raise HTTPException(
             status_code=404,
             detail="No Google account linked"
         )
-    
+
     access_token = token_record.get("access_token")
     expires_at = token_record.get("expires_at")
     refresh_token = token_record.get("refresh_token")
-    
+
     # Check if token is expired or expiring soon (within 5 minutes)
     if expires_at:
         try:
@@ -159,20 +159,20 @@ def _get_valid_access_token(
                 expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
             else:
                 expires_dt = expires_at
-            
+
             # Make current time timezone-aware if expires_dt is aware
             now = datetime.utcnow()
             if expires_dt.tzinfo is not None:
                 from datetime import timezone
                 now = now.replace(tzinfo=timezone.utc)
-            
+
             if now >= expires_dt - timedelta(minutes=5):
                 if not refresh_token:
                     raise HTTPException(
                         status_code=401,
                         detail="Token expired and no refresh token available"
                     )
-                
+
                 # Refresh the token
                 access_token = _refresh_access_token(
                     refresh_token,
@@ -194,8 +194,39 @@ def _get_valid_access_token(
                     status_code=401,
                     detail="Token expired and no refresh token available"
                 )
-    
+
     return access_token
+
+
+def _find_public_folder_id(access_token: str) -> Optional[str]:
+    """
+    Find the ID of the 'public' folder in the user's Google Drive.
+    Returns the folder ID if found, None otherwise.
+    """
+    try:
+        # Search for a folder named "public" (case-insensitive)
+        params = {
+            "q": "name='public' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            "fields": "files(id, name)",
+            "pageSize": 1
+        }
+
+        response = requests.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            files = data.get("files", [])
+            if files:
+                return files[0]["id"]
+
+        return None
+    except Exception:
+        return None
 
 
 # ============================================================================
@@ -266,7 +297,7 @@ async def get_google_drive_files(
     page_token: Optional[str] = None
 ):
     """
-    Fetch files from user's Google Drive.
+    Fetch files from user's Google Drive 'public' folder only.
     Automatically refreshes token if expired.
     """
     try:
@@ -276,18 +307,27 @@ async def get_google_drive_files(
             supabase_client,
             google_credentials
         )
-        
-        # Build query parameters
+
+        # Find the 'public' folder ID
+        public_folder_id = _find_public_folder_id(access_token)
+
+        if not public_folder_id:
+            raise HTTPException(
+                status_code=404,
+                detail="No 'public' folder found in Google Drive. Please create a folder named 'public' in your Google Drive root."
+            )
+
+        # Build query parameters to only get files inside the 'public' folder
         params = {
             "pageSize": page_size,
             "spaces": "drive",
             "fields": "files(id,name,mimeType,createdTime,modifiedTime,webViewLink,size),nextPageToken",
-            "q": "trashed=false"
+            "q": f"'{public_folder_id}' in parents and trashed=false"
         }
-        
+
         if page_token:
             params["pageToken"] = page_token
-        
+
         # Call Google Drive API
         response = requests.get(
             "https://www.googleapis.com/drive/v3/files",
@@ -295,19 +335,19 @@ async def get_google_drive_files(
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10
         )
-        
+
         if response.status_code == 401:
             raise HTTPException(
                 status_code=401,
                 detail="Google token invalid. Please relink your account."
             )
-        
+
         if response.status_code != 200:
             raise HTTPException(
                 status_code=response.status_code,
                 detail="Failed to fetch files from Google Drive"
             )
-        
+
         return response.json()
     except HTTPException:
         raise

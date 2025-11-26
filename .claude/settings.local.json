@@ -1,0 +1,7 @@
+{
+  "enabledMcpjsonServers": [
+    "nuxt-ui-remote",
+    "supabase"
+  ],
+  "enableAllProjectMcpServers": true
+}
