@@ -140,9 +140,9 @@ async def ingest_google_drive_file(
     request: IngestGoogleDriveFileRequest = Body(...)
 ):
     """
-    Ingest a Google Drive file by downloading it and storing a reference.
-    For images: Store reference + embed to Pinecone
-    For documents: Extract text, store reference, embed text to Pinecone
+    Ingest a Google Drive file by downloading it and uploading to Supabase storage.
+    For images: Upload to Supabase + embed to Pinecone
+    For documents: Upload to Supabase, extract text, embed to Pinecone
     """
     user_id = auth.id
     logger.info(f"Ingesting Google Drive file: {request.filename} (ID: {request.google_drive_id})")
@@ -156,17 +156,32 @@ async def ingest_google_drive_file(
         logger.error(f"Failed to download from Google Drive: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download file from Google Drive: {str(e)}")
 
-    # --- Use virtual reference path ---
-    storage_path = f"google-drive/{request.google_drive_id}/{request.filename}"
-    
-    # --- Storage metadata for Google Drive reference ---
-    storage_metadata = {
-        "storage_provider": "google_drive",
-        "external_id": request.google_drive_id,
-        "external_url": request.google_drive_url,
-        "bucket": "google-drive",
-    }
-    
+    # --- Upload to Supabase storage ---
+    from uuid import uuid4
+    ext = request.filename.rsplit(".", 1)[-1].lower() if "." in request.filename else ""
+
+    # Determine bucket based on file type
+    if ext in ("png", "jpeg", "jpg", "webp"):
+        bucket = "images"
+    else:
+        bucket = "documents"
+
+    # Create storage path in Supabase
+    storage_path = f"uploads/{uuid4()}_{request.filename}"
+
+    try:
+        logger.info(f"Uploading to Supabase storage: bucket={bucket}, path={storage_path}")
+        upload_result = supabase.storage.from_(bucket).upload(storage_path, content)
+        logger.info(f"Upload result: {upload_result}")
+
+        if not upload_result:
+            raise Exception("Supabase upload returned empty response")
+
+    except Exception as e:
+        logger.error(f"Failed to upload to Supabase: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file to Supabase: {str(e)}")
+
+    # --- Ingest using standard flow (no storage_metadata needed) ---
     try:
         result = await ingest_file_content(
             file_content=content,
@@ -178,7 +193,7 @@ async def ingest_google_drive_file(
             storage_path=storage_path,
             extract_deep_embeds=request.extract_deep_embeds,
             group_id=request.group_id,
-            storage_metadata=storage_metadata,
+            storage_metadata=None,  # No longer needed - file is in Supabase
         )
         logger.info(f"Google Drive file ingestion complete: {result}")
         return result

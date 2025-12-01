@@ -3,6 +3,7 @@ import logging
 from uuid import uuid4
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List, Optional
+import asyncio
 
 from core.config import get_settings
 from core.deps import get_supabase
@@ -11,6 +12,7 @@ from data_upload.supabase_image_services import ingest_single_image
 from data_upload.supabase_deep_embed_services import ingest_deep_embed_images
 from ingestion.text.extract_text import extract_text_metadata, extract_text_and_images_metadata
 from embed.embeddings import embed_texts, embed_images
+from tagging.background_tasks import tag_uploaded_image_after_ingest
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -88,8 +90,14 @@ async def ingest_file_content(
     if ext in SUPPORTED_IMAGES:
         logger.info("Processing as standalone image")
         image_vectors = await embed_images([file_content])
-        
+
+        # Extract bucket from storage_path if available
+        bucket = "images"  # default
+        if storage_metadata and "bucket" in storage_metadata:
+            bucket = storage_metadata["bucket"]
+
         result = ingest_single_image(
+            supabase,
             user_id=user_id,
             filename=filename,
             storage_path=storage_path,
@@ -103,16 +111,27 @@ async def ingest_file_content(
             embedding_version=1,
             size_bytes=len(file_content),
             group_id=group_id,
+            bucket=bucket,
         )
-        
-        # Update with storage metadata if provided
-        if storage_metadata:
-            try:
-                supabase.table("app_chunks").update(storage_metadata).eq("doc_id", doc_id).execute()
-                logger.info(f"Updated chunk metadata with storage info")
-            except Exception as e:
-                logger.warning(f"Could not update storage metadata: {e}")
-        
+
+        # Trigger auto-tagging in the background for all uploaded images (including Google Drive)
+        logger.info(f"Scheduling auto-tagging for uploaded image: doc_id={doc_id}, chunk_id={result['chunk_id']}")
+        try:
+            from tagging.background_tasks import tag_image_background
+            # Schedule tagging without blocking the response, passing chunk_id directly
+            asyncio.create_task(
+                tag_image_background(
+                    chunk_id=result["chunk_id"],
+                    user_id=user_id,
+                    doc_id=doc_id,
+                    image_embedding=image_vectors[0],
+                    storage_path=result["storage_path"],
+                    bucket=result["bucket"]
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Failed to schedule tagging task: {e}")
+
         logger.info(f"Image ingestion complete: doc_id={doc_id}")
         return {
             "doc_id": doc_id,
@@ -186,6 +205,7 @@ async def ingest_file_content(
     logger.info("Ingesting text chunks to Pinecone")
     try:
         text_result = ingest_text_chunks(
+            supabase,
             user_id=user_id,
             filename=filename,
             storage_path=storage_path,
@@ -223,7 +243,7 @@ async def ingest_file_content(
             image_bytes_list = [img["image_bytes"] for img in images_data]
             image_vectors = await embed_images(image_bytes_list)
             logger.info(f"Generated {len(image_vectors)} image embeddings")
-            
+
             logger.info("Ingesting deep embed images")
             images_result = ingest_deep_embed_images(
                 supabase=supabase,
@@ -240,6 +260,36 @@ async def ingest_file_content(
                 group_id=group_id,
             )
             logger.info(f"Image ingestion complete: {images_result}")
+
+            # Trigger auto-tagging for extracted images
+            logger.info(f"Scheduling auto-tagging for {len(images_data)} extracted images")
+            try:
+                # Get chunk IDs from the database
+                chunks_result = supabase.table("app_chunks").select("chunk_id, storage_path, bucket").eq(
+                    "doc_id", doc_id
+                ).eq("user_id", user_id).eq("modality", "image").execute()
+
+                # Schedule tagging for each extracted image
+                for idx, (chunk_data, image_embedding, image_data) in enumerate(zip(chunks_result.data, image_vectors, images_data)):
+                    chunk_id = chunk_data["chunk_id"]
+                    storage_path = chunk_data["storage_path"]
+                    bucket = chunk_data["bucket"]
+
+                    from tagging.background_tasks import tag_image_background
+                    asyncio.create_task(
+                        tag_image_background(
+                            chunk_id=chunk_id,
+                            user_id=user_id,
+                            doc_id=doc_id,
+                            image_embedding=image_embedding,
+                            storage_path=storage_path,
+                            bucket=bucket
+                        )
+                    )
+                    logger.info(f"Scheduled tagging for extracted image {idx + 1}/{len(images_data)}")
+            except Exception as e:
+                logger.warning(f"Failed to schedule tagging for extracted images: {e}")
+
         except Exception as e:
             logger.error(f"Error during image ingestion: {e}", exc_info=True)
             logger.warning("Continuing despite image ingestion failure")

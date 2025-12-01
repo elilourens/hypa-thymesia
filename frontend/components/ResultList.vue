@@ -49,13 +49,6 @@ function buildDeepLink(baseUrl: string, r: any) {
 
 async function handleOpen(r: any) {
   try {
-    // Check if this is a Google Drive file
-    if (r.metadata?.storage_provider === 'google_drive' && r.metadata?.external_id) {
-      const viewUrl = `https://drive.google.com/file/d/${r.metadata.external_id}/preview`
-      window.open(viewUrl, '_blank')
-      return
-    }
-
     const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
     if (!url) throw new Error('No URL returned')
     window.open(buildDeepLink(url, r), '_blank')
@@ -70,13 +63,6 @@ async function handleOpen(r: any) {
 
 async function handleDownload(r: any) {
   try {
-    // Check if this is a Google Drive file
-    if (r.metadata?.storage_provider === 'google_drive' && r.metadata?.external_id) {
-      const downloadUrl = `https://drive.google.com/uc?export=download&id=${r.metadata.external_id}`
-      window.open(downloadUrl, '_blank')
-      return
-    }
-
     const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
     if (!url) throw new Error('No URL returned')
     window.open(url, '_blank')
@@ -98,14 +84,13 @@ watch(
     if (!newResults?.length) return
     for (const r of newResults) {
       const modality = (r.metadata?.modality || '').toLowerCase()
-      
+
       // For images, fetch thumbnail URL
       if (modality === 'image' && !r.metadata?.signed_url) {
         try {
           const url = await getThumbnailUrl(
-            r.metadata.bucket, 
-            r.metadata.storage_path,
-            r.metadata.mime_type
+            r.metadata.bucket,
+            r.metadata.storage_path
           )
           if (url) r.metadata.signed_url = url
         } catch (err) {
@@ -137,9 +122,6 @@ watch(
         <div class="flex items-center justify-between text-xs text-gray-500">
           <span>
             File: <strong>{{ getFileName(r.metadata?.title) }}</strong>
-            <span v-if="r.metadata?.storage_provider === 'google_drive'" class="ml-1 inline-block">
-              <UBadge variant="subtle" size="xs" color="primary">Google Drive</UBadge>
-            </span>
           </span>
 
           <div class="flex items-center gap-2">
@@ -154,7 +136,7 @@ watch(
             </UButton>
 
             <UButton
-              v-if="(r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document') || r.metadata?.storage_provider === 'google_drive'"
+              v-if="(r.metadata?.mime_type || '').includes('officedocument.wordprocessingml.document')"
               size="xs"
               color="primary"
               variant="soft"
@@ -182,11 +164,23 @@ watch(
             :src="r.metadata.signed_url"
             :alt="r.metadata?.title || 'image result'"
             class="object-contain mx-auto p-2 rounded-md border border-gray-200"
-            :title="r.metadata?.storage_provider === 'google_drive' ? 'Google Drive image' : 'Uploaded image'"
           />
           <p v-else class="text-sm text-gray-400 italic">
             (Image loading...)
           </p>
+
+          <!-- Display tags if available -->
+          <div v-if="r.metadata?.tags && r.metadata.tags.length > 0" class="mt-2 flex flex-wrap gap-1">
+            <UBadge
+              v-for="tag in r.metadata.tags"
+              :key="tag.tag_name"
+              variant="soft"
+              color="primary"
+              size="xs"
+            >
+              {{ tag.tag_name }} ({{ (tag.confidence * 100).toFixed(0) }}%)
+            </UBadge>
+          </div>
         </div>
 
         <!-- Inline PDF preview -->

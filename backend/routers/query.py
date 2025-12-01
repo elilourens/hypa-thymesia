@@ -102,8 +102,9 @@ async def query_endpoint(
         # keep only bucket & path for later use by /storage/signed-url
         bucket = md.get("bucket")
         storage_path = md.get("storage_path")
-        
-        # NEW: For extracted images, also include parent doc info
+        chunk_id = md.get("chunk_id")
+
+        # For extracted images, also include parent doc info
         if md.get("source") == "extracted":
             md = md | {
                 "bucket": bucket,
@@ -116,9 +117,23 @@ async def query_endpoint(
         else:
             md = md | {"bucket": bucket, "storage_path": storage_path}
 
-        # 🔑 Add highlighting for text-based metadata
+        # Add highlighting for text-based metadata
         if "text" in md and req.query_text:
             md["highlight_spans"] = find_highlights(md["text"], req.query_text)
+
+        # Add tags for image results
+        if md.get("modality") == "image" and chunk_id:
+            try:
+                # Query tags from database
+                tags_result = supabase.table("app_image_tags").select("tag_name, confidence, bbox").eq(
+                    "chunk_id", chunk_id
+                ).eq("user_id", user_id).eq("verified", True).order("confidence", desc=True).execute()
+
+                if tags_result.data:
+                    md["tags"] = tags_result.data
+            except Exception as e:
+                import logging
+                logging.warning(f"Failed to fetch tags for chunk {chunk_id}: {e}")
 
         matches.append(
             QueryMatch(

@@ -1,26 +1,18 @@
 import os
-import hashlib
 from typing import Optional, List, Dict, Any
 from uuid import uuid4
 from datetime import datetime
 
-from dotenv import load_dotenv
-from supabase import create_client, Client
+from supabase import Client
 
 from data_upload.pinecone_services import build_vector_item, upsert_vectors
+from utils.db_helpers import ensure_doc_meta, register_vectors, sha256_hash
 
-load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 TEXT_BUCKET = os.getenv("TEXT_BUCKET", "texts")
 
 
 def upload_text_to_bucket(
+    supabase: Client,
     file_content: bytes,
     filename: str,
     bucket: str = TEXT_BUCKET,
@@ -42,7 +34,7 @@ def upload_text_to_bucket(
     return file_path if resp else None
 
 
-def delete_text_from_bucket(filepath: str, bucket: str = TEXT_BUCKET) -> bool:
+def delete_text_from_bucket(supabase: Client, filepath: str, bucket: str = TEXT_BUCKET) -> bool:
     try:
         res = supabase.storage.from_(bucket).remove([filepath])
         return any(obj.get("name") == filepath for obj in (res or []))
@@ -51,25 +43,12 @@ def delete_text_from_bucket(filepath: str, bucket: str = TEXT_BUCKET) -> bool:
         return False
 
 
-def wipe_text_from_bucket(bucket: str = TEXT_BUCKET) -> str:
+def wipe_text_from_bucket(supabase: Client, bucket: str = TEXT_BUCKET) -> str:
     return supabase.storage.empty_bucket(bucket)
 
 
-def _sha256_text(t: str) -> str:
-    return hashlib.sha256(t.encode("utf-8")).hexdigest()
-
-
-def _ensure_doc_meta(*, user_id: str, doc_id: str, group_id: Optional[str]) -> None:
-    """
-    app_docs is a VIEW; persist group ownership in app_doc_meta.
-    """
-    supabase.table("app_doc_meta").upsert(
-        {"doc_id": doc_id, "user_id": user_id, "group_id": group_id},
-        on_conflict="doc_id",
-    ).execute()
-
-
 def _insert_chunk_rows(
+    supabase: Client,
     *,
     user_id: str,
     doc_id: str,
@@ -96,12 +75,8 @@ def _insert_chunk_rows(
     return data.data or []
 
 
-def _register_vectors(rows: List[Dict[str, Any]]) -> None:
-    if rows:
-        supabase.table("app_vector_registry").upsert(rows).execute()
-
-
 def ingest_text_chunks(
+    supabase: Client,
     *,
     user_id: str,
     filename: str,
@@ -130,9 +105,10 @@ def ingest_text_chunks(
     doc_id = doc_id or str(uuid4())
 
     # ensure meta row (stores group_id)
-    _ensure_doc_meta(user_id=user_id, doc_id=doc_id, group_id=group_id)
+    ensure_doc_meta(supabase, user_id=user_id, doc_id=doc_id, group_id=group_id)
 
     chunk_rows = _insert_chunk_rows(
+        supabase,
         user_id=user_id,
         doc_id=doc_id,
         storage_path=storage_path,
@@ -159,7 +135,7 @@ def ingest_text_chunks(
             "mime_type": ch["mime_type"],
             "embedding_model": embedding_model,
             "embedding_version": embedding_version,
-            "content_sha256": _sha256_text(text),
+            "content_sha256": sha256_hash(text),
             "title": filename,
             "text": text,
             "upload_date": datetime.utcnow().date().isoformat(),
@@ -189,7 +165,7 @@ def ingest_text_chunks(
         })
 
     upsert_vectors(vectors=vectors, modality="text", namespace=namespace or str(user_id))
-    _register_vectors(registry)
+    register_vectors(supabase, registry)
 
     return {
         "doc_id": doc_id,

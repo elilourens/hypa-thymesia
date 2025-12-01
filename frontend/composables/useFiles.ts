@@ -96,36 +96,25 @@ export function useFilesApi() {
   }
 
   /**
-   * Extract Google Drive file ID from path.
-   * Path format: google-drive/{FILE_ID}/{FILENAME}
-   */
-  function extractGoogleDriveFileId(path: string): string | null {
-    const parts = path.replace('google-drive/', '').split('/')
-    return parts[0] || null
-  }
-
-  /**
-   * Get a signed URL for one file.
-   * Handles both Supabase and Google Drive files.
+   * Get a signed URL for one file in Supabase storage.
    */
   async function getSignedUrl(bucket: string, path: string): Promise<string> {
     const headers = await authHeaders()
-    
+
     try {
-      // Call the backend endpoint - it will handle both Supabase and Google Drive
       const res = await $fetch<{ signed_url: string; provider?: string }>(
         `${API_BASE}/storage/signed-url`,
-        { 
-          method: 'GET', 
-          headers, 
-          params: { bucket, path } 
+        {
+          method: 'GET',
+          headers,
+          params: { bucket, path }
         }
       )
-      
+
       if (!res.signed_url) {
         throw new Error('No signed URL returned')
       }
-      
+
       return res.signed_url
     } catch (err: any) {
       console.error('Error getting signed URL:', err)
@@ -134,20 +123,9 @@ export function useFilesApi() {
   }
 
   /**
-   * Get a thumbnail URL for Google Drive files.
-   * Returns either a Google Drive thumbnail or a signed URL for Supabase files.
+   * Get a thumbnail URL for files (same as signed URL for Supabase).
    */
-  async function getThumbnailUrl(bucket: string, path: string, mimeType?: string): Promise<string> {
-    // For Google Drive files, use the thumbnail endpoint
-    if (bucket === 'google-drive' || path.startsWith('google-drive/')) {
-      const fileId = extractGoogleDriveFileId(path)
-      if (fileId) {
-        // Google Drive thumbnail - works directly in img tags
-        return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`
-      }
-    }
-    
-    // For regular files, use signed URL
+  async function getThumbnailUrl(bucket: string, path: string): Promise<string> {
     return getSignedUrl(bucket, path)
   }
 

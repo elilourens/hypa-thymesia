@@ -36,9 +36,10 @@ async def ingest_text_and_image_files(
     try:
         # Determine storage path based on file type
         if ext in ("png", "jpeg", "jpg", "webp"):
-            storage_path = upload_image_to_bucket(content, file.filename)
+            storage_path = upload_image_to_bucket(supabase, content, file.filename)
         else:
             storage_path = upload_text_to_bucket(
+                supabase,
                 content,
                 file.filename,
                 mime_type=file.content_type,

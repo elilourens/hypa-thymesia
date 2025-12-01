@@ -5,21 +5,12 @@ import logging
 from typing import List, Dict, Any, Optional
 from uuid import uuid4
 from datetime import datetime
-from dotenv import load_dotenv
 from supabase import Client
 
 from data_upload.pinecone_services import build_vector_item, upsert_vectors
+from utils.db_helpers import ensure_doc_meta, register_vectors
 
-load_dotenv()
 logger = logging.getLogger(__name__)
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY")
-
-from supabase import create_client
-_supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 EXTRACTED_IMAGES_BUCKET = os.getenv("EXTRACTED_IMAGES_BUCKET", "extracted-images")
 
@@ -63,12 +54,6 @@ def upload_extracted_image_to_bucket(
     }
 
 
-def _ensure_doc_meta(supabase: Client, *, user_id: str, doc_id: str, group_id: Optional[str]) -> None:
-    """Ensure doc_meta row exists."""
-    supabase.table("app_doc_meta").upsert(
-        {"doc_id": doc_id, "user_id": user_id, "group_id": group_id},
-        on_conflict="doc_id",
-    ).execute()
 
 
 def ingest_deep_embed_images(
@@ -104,8 +89,8 @@ def ingest_deep_embed_images(
             "images_ingested": 0,
             "namespace": namespace or user_id,
         }
-    
-    _ensure_doc_meta(supabase, user_id=user_id, doc_id=doc_id, group_id=group_id)
+
+    ensure_doc_meta(supabase, user_id=user_id, doc_id=doc_id, group_id=group_id)
     
     # Find the max chunk_index for this doc to continue numbering
     existing_chunks = supabase.table("app_chunks").select("chunk_index").eq(
@@ -195,9 +180,9 @@ def ingest_deep_embed_images(
     # Insert into Supabase
     if chunk_rows:
         supabase.table("app_chunks").insert(chunk_rows).execute()
-    
+
     if registry:
-        supabase.table("app_vector_registry").upsert(registry).execute()
+        register_vectors(supabase, registry)
     
     # Upsert to Pinecone EXTRACTED IMAGES index
     if vectors:

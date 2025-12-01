@@ -1,59 +1,50 @@
 import os
-import hashlib
 import logging
 from typing import Optional, List, Dict, Any
 from uuid import uuid4
 from datetime import datetime
 from io import BytesIO
 
-from dotenv import load_dotenv
-from supabase import create_client, Client
+from supabase import Client
 from PIL import Image
 
 from data_upload.pinecone_services import build_vector_item, upsert_vectors
+from utils.db_helpers import ensure_doc_meta, register_vectors, sha256_hash
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 IMAGE_BUCKET = os.getenv("IMAGE_BUCKET", "images")
 
 
-def upload_image_to_bucket(file_content: bytes, filename: str, bucket: str = IMAGE_BUCKET) -> Optional[str]:
+def upload_image_to_bucket(supabase: Client, file_content: bytes, filename: str, bucket: str = IMAGE_BUCKET) -> Optional[str]:
     logger.info(f"upload_image_to_bucket called: filename={filename}, size={len(file_content)} bytes, bucket={bucket}")
-    
+
     ext = os.path.splitext(filename)[1].lower()
     logger.info(f"File extension: {ext}")
-    
+
     if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
         logger.warning(f"Unsupported image extension: {ext}")
         return None
-    
+
     try:
         logger.info("Opening image with PIL...")
         img = Image.open(BytesIO(file_content))
         logger.info(f"Image opened successfully: format={img.format}, size={img.size}")
-        
+
         logger.info("Verifying image...")
         img.verify()
         logger.info("Image verification passed")
     except Exception as e:
         logger.error(f"Image validation failed: {e}", exc_info=True)
         return None
-    
+
     file_path = f"uploads/{uuid4()}_{filename}"
     logger.info(f"Uploading to bucket '{bucket}' at path: {file_path}")
-    
+
     try:
         resp = supabase.storage.from_(bucket).upload(file_path, file_content)
         logger.info(f"Upload response: {resp}")
-        
+
         if resp:
             logger.info(f"Upload successful, returning path: {file_path}")
             return file_path
@@ -65,7 +56,7 @@ def upload_image_to_bucket(file_content: bytes, filename: str, bucket: str = IMA
         return None
 
 
-def delete_image_from_bucket(filepath: str, bucket: str = IMAGE_BUCKET) -> bool:
+def delete_image_from_bucket(supabase: Client, filepath: str, bucket: str = IMAGE_BUCKET) -> bool:
     try:
         res = supabase.storage.from_(bucket).remove([filepath])
         return any(obj.get("name") == filepath for obj in (res or []))
@@ -74,22 +65,12 @@ def delete_image_from_bucket(filepath: str, bucket: str = IMAGE_BUCKET) -> bool:
         return False
 
 
-def wipe_images_from_bucket(bucket: str = IMAGE_BUCKET) -> str:
+def wipe_images_from_bucket(supabase: Client, bucket: str = IMAGE_BUCKET) -> str:
     return supabase.storage.empty_bucket(bucket)
 
 
-def _sha256_bytes(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()
-
-
-def _ensure_doc_meta(*, user_id: str, doc_id: str, group_id: Optional[str]) -> None:
-    supabase.table("app_doc_meta").upsert(
-        {"doc_id": doc_id, "user_id": user_id, "group_id": group_id},
-        on_conflict="doc_id",
-    ).execute()
-
-
 def _insert_single_image_chunk(
+    supabase: Client,
     *,
     user_id: str,
     doc_id: str,
@@ -115,12 +96,8 @@ def _insert_single_image_chunk(
     return data.data[0]
 
 
-def _register_vectors(rows: List[Dict[str, Any]]) -> None:
-    if rows:
-        supabase.table("app_vector_registry").upsert(rows).execute()
-
-
 def ingest_single_image(
+    supabase: Client,
     *,
     user_id: str,
     filename: str,
@@ -134,7 +111,8 @@ def ingest_single_image(
     doc_id: Optional[str] = None,
     embedding_version: int = 1,
     size_bytes: int | None = None,
-    group_id: Optional[str] = None,  # NEW
+    group_id: Optional[str] = None,
+    bucket: str = "images",  # Allow custom bucket
 ) -> Dict[str, Any]:
     if len(embed_image_vectors) != 1:
         raise ValueError("Expected exactly one image embedding")
@@ -142,13 +120,14 @@ def ingest_single_image(
         raise ValueError(f"Embedding dim mismatch for image: got {embedding_dim}, expected 512.")
 
     doc_id = doc_id or str(uuid4())
-    _ensure_doc_meta(user_id=user_id, doc_id=doc_id, group_id=group_id)
+    ensure_doc_meta(supabase, user_id=user_id, doc_id=doc_id, group_id=group_id)
 
     chunk_row = _insert_single_image_chunk(
+        supabase,
         user_id=user_id,
         doc_id=doc_id,
         storage_path=storage_path,
-        bucket="images",
+        bucket=bucket,
         mime_type=mime_type,
         size_bytes=size_bytes,
     )
@@ -166,7 +145,7 @@ def ingest_single_image(
         "mime_type": chunk_row["mime_type"],
         "embedding_model": embedding_model,
         "embedding_version": embedding_version,
-        "content_sha256": _sha256_bytes(file_bytes),
+        "content_sha256": sha256_hash(file_bytes),
         "title": filename,
         "upload_date": datetime.utcnow().date().isoformat(),
     }
@@ -176,7 +155,7 @@ def ingest_single_image(
     vector_item = build_vector_item(vector_id=vector_id, values=emb, metadata=metadata)
     upsert_vectors(vectors=[vector_item], modality="image", namespace=namespace or str(user_id))
 
-    _register_vectors([{
+    register_vectors(supabase, [{
         "vector_id": vector_id,
         "chunk_id": chunk_row["chunk_id"],
         "embedding_model": embedding_model,
@@ -185,6 +164,9 @@ def ingest_single_image(
 
     return {
         "doc_id": doc_id,
+        "chunk_id": chunk_row["chunk_id"],
+        "storage_path": chunk_row["storage_path"],
+        "bucket": chunk_row["bucket"],
         "vector_count": 1,
         "namespace": (namespace or str(user_id)),
     }
