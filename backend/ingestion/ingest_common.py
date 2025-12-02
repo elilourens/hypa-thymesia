@@ -261,34 +261,9 @@ async def ingest_file_content(
             )
             logger.info(f"Image ingestion complete: {images_result}")
 
-            # Trigger auto-tagging for extracted images
-            logger.info(f"Scheduling auto-tagging for {len(images_data)} extracted images")
-            try:
-                # Get chunk IDs from the database
-                chunks_result = supabase.table("app_chunks").select("chunk_id, storage_path, bucket").eq(
-                    "doc_id", doc_id
-                ).eq("user_id", user_id).eq("modality", "image").execute()
-
-                # Schedule tagging for each extracted image
-                for idx, (chunk_data, image_embedding, image_data) in enumerate(zip(chunks_result.data, image_vectors, images_data)):
-                    chunk_id = chunk_data["chunk_id"]
-                    storage_path = chunk_data["storage_path"]
-                    bucket = chunk_data["bucket"]
-
-                    from tagging.background_tasks import tag_image_background
-                    asyncio.create_task(
-                        tag_image_background(
-                            chunk_id=chunk_id,
-                            user_id=user_id,
-                            doc_id=doc_id,
-                            image_embedding=image_embedding,
-                            storage_path=storage_path,
-                            bucket=bucket
-                        )
-                    )
-                    logger.info(f"Scheduled tagging for extracted image {idx + 1}/{len(images_data)}")
-            except Exception as e:
-                logger.warning(f"Failed to schedule tagging for extracted images: {e}")
+            # NOTE: Auto-tagging disabled for images extracted from documents (PDFs/DOCX)
+            # Only directly uploaded images are auto-tagged
+            logger.info(f"Skipping auto-tagging for {len(images_data)} extracted images from document")
 
         except Exception as e:
             logger.error(f"Error during image ingestion: {e}", exc_info=True)
