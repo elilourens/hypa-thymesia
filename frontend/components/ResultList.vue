@@ -151,11 +151,29 @@ watch(
         <USeparator orientation="horizontal" class="h-auto self-stretch" size="lg" />
 
         <!-- Render text hits -->
-        <p v-if="(r.metadata?.modality || '').toLowerCase() === 'text'">
-          <span
-            v-html="renderHighlightedText(r.metadata?.text, r.metadata?.highlight_spans)"
-          />
-        </p>
+        <div v-if="(r.metadata?.modality || '').toLowerCase() === 'text'">
+          <p>
+            <span
+              v-html="renderHighlightedText(r.metadata?.text, r.metadata?.highlight_spans)"
+            />
+          </p>
+
+          <!-- Display document tags if available -->
+          <div v-if="r.metadata?.tags && r.metadata.tags.length > 0" class="mt-3 space-y-2">
+            <p class="text-xs font-semibold text-gray-600">Document Tags:</p>
+            <div class="flex flex-wrap gap-1.5">
+              <UBadge
+                v-for="tag in r.metadata.tags"
+                :key="tag.tag_name"
+                variant="soft"
+                color="primary"
+                size="xs"
+              >
+                {{ tag.tag_name }} ({{ (tag.confidence * 100).toFixed(0) }}%)
+              </UBadge>
+            </div>
+          </div>
+        </div>
 
         <!-- Render image hits -->
         <div v-else-if="(r.metadata?.modality || '').toLowerCase() === 'image'">

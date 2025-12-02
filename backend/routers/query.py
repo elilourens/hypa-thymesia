@@ -127,13 +127,30 @@ async def query_endpoint(
                 # Query tags from database
                 tags_result = supabase.table("app_image_tags").select("tag_name, confidence, bbox").eq(
                     "chunk_id", chunk_id
-                ).eq("user_id", user_id).eq("verified", True).order("confidence", desc=True).execute()
+                ).eq("user_id", user_id).eq("tag_type", "image").eq("verified", True).order("confidence", desc=True).execute()
 
                 if tags_result.data:
                     md["tags"] = tags_result.data
             except Exception as e:
                 import logging
                 logging.warning(f"Failed to fetch tags for chunk {chunk_id}: {e}")
+
+        # Add tags for text/document results (document-level tags, not chunk-level)
+        if md.get("modality") == "text":
+            # Get doc_id from metadata
+            doc_id = md.get("doc_id")
+            if doc_id:
+                try:
+                    # Query document-level tags from database (chunk_id IS NULL)
+                    tags_result = supabase.table("app_image_tags").select("tag_name, confidence, category, reasoning").eq(
+                        "doc_id", doc_id
+                    ).eq("user_id", user_id).eq("tag_type", "document").is_("chunk_id", "null").order("confidence", desc=True).limit(10).execute()
+
+                    if tags_result.data:
+                        md["tags"] = tags_result.data
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to fetch document tags for doc {doc_id}: {e}")
 
         matches.append(
             QueryMatch(

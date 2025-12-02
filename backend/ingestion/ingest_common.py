@@ -12,7 +12,7 @@ from data_upload.supabase_image_services import ingest_single_image
 from data_upload.supabase_deep_embed_services import ingest_deep_embed_images
 from ingestion.text.extract_text import extract_text_metadata, extract_text_and_images_metadata
 from embed.embeddings import embed_texts, embed_images
-from tagging.background_tasks import tag_uploaded_image_after_ingest
+from tagging.background_tasks import tag_uploaded_image_after_ingest, tag_document_after_ingest
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -288,6 +288,23 @@ async def ingest_file_content(
         logger.error(f"Error extracting images_ingested: {e}")
         images_extracted = 0
     
+    # --- Trigger document tagging in the background ---
+    # Tag the document after text ingestion completes
+    # Pass the text chunks directly to avoid querying Pinecone
+    logger.info(f"Scheduling document tagging for doc_id={doc_id}")
+    try:
+        asyncio.create_task(
+            tag_document_after_ingest(
+                doc_id=doc_id,
+                user_id=user_id,
+                filename=filename,
+                text_chunks=texts  # Pass extracted text directly
+            )
+        )
+        logger.info("Document tagging task scheduled successfully")
+    except Exception as e:
+        logger.warning(f"Failed to schedule document tagging task: {e}")
+
     response = {
         "doc_id": str(doc_id),
         "text_chunks_ingested": int(text_chunks_count),
