@@ -125,10 +125,135 @@ export function useIngest() {
     }
   }
 
+  // --- Query by tags ---
+  interface TagQueryOpts {
+    tags: string[]
+    min_confidence?: number
+    limit?: number
+    category?: string
+    group_id?: string
+  }
+
+  interface TagQueryResponse {
+    results: any[]
+    count: number
+  }
+
+  async function queryByTags(opts: TagQueryOpts): Promise<TagQueryResponse> {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(await authHeaders()),
+      }
+
+      const params = new URLSearchParams()
+      if (opts.category) params.append('category', opts.category)
+      if (opts.group_id !== undefined) params.append('group_id', opts.group_id)
+
+      const queryString = params.toString() ? `?${params.toString()}` : ''
+
+      return await $fetch<TagQueryResponse>(
+        `${API_BASE}/tagging/search/by-document-tags${queryString}`,
+        {
+          method: 'POST',
+          headers,
+          body: {
+            tags: opts.tags,
+            min_confidence: opts.min_confidence ?? 0.5,
+            limit: opts.limit ?? 50,
+          },
+        }
+      )
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Tag query failed')
+    }
+  }
+
+  // --- Query images by tags ---
+  async function queryImagesByTags(opts: TagQueryOpts): Promise<TagQueryResponse> {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(await authHeaders()),
+      }
+
+      const params = new URLSearchParams()
+      if (opts.group_id !== undefined) params.append('group_id', opts.group_id)
+
+      const queryString = params.toString() ? `?${params.toString()}` : ''
+
+      return await $fetch<TagQueryResponse>(
+        `${API_BASE}/tagging/search/by-tags${queryString}`,
+        {
+          method: 'POST',
+          headers,
+          body: {
+            tags: opts.tags,
+            min_confidence: opts.min_confidence ?? 0.7,
+            limit: opts.limit ?? 50,
+          },
+        }
+      )
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Image tag query failed')
+    }
+  }
+
+  // --- Get available tags ---
+  interface TagCategory {
+    label: string
+    description: string
+    tags: string[]
+  }
+
+  interface AvailableTagsResponse {
+    categories: Record<string, TagCategory>
+  }
+
+  async function getAvailableTags(): Promise<AvailableTagsResponse> {
+    try {
+      const headers = await authHeaders()
+      return await $fetch<AvailableTagsResponse>(
+        `${API_BASE}/tagging/tags/available`,
+        {
+          method: 'GET',
+          headers,
+        }
+      )
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Failed to fetch tags')
+    }
+  }
+
+  // --- Get user's actual tags ---
+  interface UserTagsResponse {
+    categories: Record<string, string[]>
+    total_unique_tags: number
+  }
+
+  async function getUserTags(tagType: 'document' | 'image' = 'document'): Promise<UserTagsResponse> {
+    try {
+      const headers = await authHeaders()
+      return await $fetch<UserTagsResponse>(
+        `${API_BASE}/tagging/tags/user-tags?tag_type=${tagType}`,
+        {
+          method: 'GET',
+          headers,
+        }
+      )
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Failed to fetch user tags')
+    }
+  }
+
   return {
     uploadFile,
     queryText,
     queryImage,
     deleteDoc,
+    queryByTags,
+    queryImagesByTags,
+    getAvailableTags,
+    getUserTags,
   }
 }

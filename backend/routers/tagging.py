@@ -11,13 +11,12 @@ from core.security import get_current_user, AuthUser
 from tagging import (
     tag_image,
     get_tags_for_chunk,
-    search_chunks_by_tags,
     get_popular_tags,
 )
 from tagging.document_tagger import get_document_tagger
 
 
-router = APIRouter()
+router = APIRouter(prefix="/tagging", tags=["tagging"])
 
 
 class TagImageRequest(BaseModel):
@@ -95,7 +94,7 @@ async def tag_uploaded_image(
         raise HTTPException(status_code=400, detail="Chunk is not an image")
 
     # Get image embedding from Pinecone
-    from ..data_upload.pinecone_services import query_vectors
+    from data_upload.pinecone_services import query_vectors
 
     vector_result = await query_vectors(
         query_embedding=None,  # Not used, we just need to fetch by ID
@@ -158,21 +157,104 @@ async def get_image_tags(
 @router.post("/search/by-tags", response_model=SearchByTagsResponse)
 async def search_images_by_tags(
     request: SearchByTagsRequest,
+    group_id: Optional[str] = None,
     user: AuthUser = Depends(get_current_user)
 ):
     """
     Search for images by detected object tags.
 
     Returns image chunks that contain the specified tags.
+
+    Query Parameters:
+    - group_id: Optional group filter (null for ungrouped, omit for all)
     """
     user_id = user.id
+    supabase = get_supabase()
 
-    results = await search_chunks_by_tags(
-        user_id=user_id,
-        tags=request.tags,
-        min_confidence=request.min_confidence,
-        limit=request.limit
+    # Query image tags
+    query = (
+        supabase.table("app_image_tags")
+        .select("chunk_id, tag_name, confidence, bbox")
+        .eq("user_id", user_id)
+        .eq("tag_type", "image")
+        .in_("tag_name", request.tags)
+        .gte("confidence", request.min_confidence)
+        .not_.is_("chunk_id", "null")
     )
+
+    tags_result = query.execute()
+
+    # Group by chunk_id
+    chunk_map: Dict[str, Dict[str, Any]] = {}
+    for tag in tags_result.data or []:
+        chunk_id = tag["chunk_id"]
+        if chunk_id not in chunk_map:
+            chunk_map[chunk_id] = {
+                "chunk_id": chunk_id,
+                "tags": []
+            }
+        chunk_map[chunk_id]["tags"].append({
+            "tag_name": tag["tag_name"],
+            "confidence": tag["confidence"],
+            "bbox": tag.get("bbox")
+        })
+
+    # Get chunk metadata and filter by group
+    results = []
+    for chunk_id, tag_data in chunk_map.items():
+        # Fetch chunk metadata including doc_id
+        chunk_result = (
+            supabase.table("app_chunks")
+            .select("chunk_id, doc_id, storage_path, bucket, mime_type")
+            .eq("chunk_id", chunk_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        if not chunk_result.data:
+            continue
+
+        chunk = chunk_result.data[0]
+        doc_id = chunk["doc_id"]
+
+        # Get document metadata to check group
+        doc_result = (
+            supabase.table("app_doc_meta")
+            .select("group_id")
+            .eq("doc_id", doc_id)
+            .execute()
+        )
+
+        if not doc_result.data:
+            continue
+
+        doc = doc_result.data[0]
+
+        # Apply group filter
+        if group_id is not None:
+            if group_id == "":
+                # Filter for ungrouped
+                if doc.get("group_id") is not None:
+                    continue
+            else:
+                # Filter for specific group
+                if doc.get("group_id") != group_id:
+                    continue
+
+        results.append({
+            "chunk_id": chunk_id,
+            "doc_id": doc_id,
+            "group_id": doc.get("group_id"),
+            "tags": tag_data["tags"],
+            "storage_path": chunk["storage_path"],
+            "bucket": chunk["bucket"],
+            "mime_type": chunk.get("mime_type"),
+            "avg_confidence": sum(t["confidence"] for t in tag_data["tags"]) / len(tag_data["tags"])
+        })
+
+    # Sort by confidence and limit
+    results.sort(key=lambda x: x["avg_confidence"], reverse=True)
+    results = results[:request.limit]
 
     return SearchByTagsResponse(results=results, count=len(results))
 
@@ -358,23 +440,28 @@ async def get_document_tags(
 async def search_documents_by_tags(
     request: SearchByTagsRequest,
     category: Optional[str] = None,
+    group_id: Optional[str] = None,
     user: AuthUser = Depends(get_current_user)
 ):
     """
-    Search for document chunks by LLM-assigned tags.
+    Search for documents by LLM-assigned tags.
+
+    Returns full document metadata including all chunks.
 
     Query Parameters:
     - category: Optional category filter (e.g., "document_type", "subject_domain")
+    - group_id: Optional group filter (null for ungrouped, omit for all)
     """
     user_id = user.id
     supabase = get_supabase()
 
-    # Build query
+    # Build query for document-level tags (chunk_id IS NULL)
     query = (
         supabase.table("app_image_tags")
-        .select("chunk_id, tag_name, confidence, category")
+        .select("doc_id, tag_name, confidence, category")
         .eq("user_id", user_id)
         .eq("tag_type", "document")
+        .is_("chunk_id", "null")
         .in_("tag_name", request.tags)
         .gte("confidence", request.min_confidence)
     )
@@ -383,32 +470,197 @@ async def search_documents_by_tags(
     if category:
         query = query.eq("category", category)
 
-    tags_result = query.limit(request.limit).execute()
+    tags_result = query.execute()
 
-    # Group results by chunk_id
-    chunk_map: Dict[str, Dict[str, Any]] = {}
+    # Group results by doc_id
+    doc_map: Dict[str, Dict[str, Any]] = {}
     for tag in tags_result.data or []:
-        chunk_id = tag["chunk_id"]
-        if chunk_id not in chunk_map:
-            chunk_map[chunk_id] = {
-                "chunk_id": chunk_id,
+        doc_id = tag["doc_id"]
+        if doc_id not in doc_map:
+            doc_map[doc_id] = {
+                "doc_id": doc_id,
                 "tags": [],
                 "avg_confidence": 0.0
             }
-        chunk_map[chunk_id]["tags"].append({
+        doc_map[doc_id]["tags"].append({
             "tag_name": tag["tag_name"],
             "confidence": tag["confidence"],
             "category": tag.get("category")
         })
 
-    # Calculate average confidence for each chunk
+    # Get document metadata and chunks for matching docs
     results = []
-    for chunk_id, data in chunk_map.items():
-        avg_conf = sum(t["confidence"] for t in data["tags"]) / len(data["tags"])
-        data["avg_confidence"] = avg_conf
-        results.append(data)
+    for doc_id, tag_data in doc_map.items():
+        # Calculate average confidence
+        avg_conf = sum(t["confidence"] for t in tag_data["tags"]) / len(tag_data["tags"])
+
+        # Fetch document metadata
+        doc_query = (
+            supabase.table("app_doc_meta")
+            .select("doc_id, user_id, group_id")
+            .eq("doc_id", doc_id)
+            .eq("user_id", user_id)
+        )
+
+        doc_result = doc_query.execute()
+
+        if not doc_result.data:
+            continue
+
+        doc = doc_result.data[0]
+
+        # Apply group filter if specified
+        if group_id is not None:
+            if group_id == "":
+                # Filter for ungrouped documents
+                if doc.get("group_id") is not None:
+                    continue
+            else:
+                # Filter for specific group
+                if doc.get("group_id") != group_id:
+                    continue
+
+        # Fetch chunks for this document
+        chunks_result = (
+            supabase.table("app_chunks")
+            .select("chunk_id, chunk_index, modality, storage_path, bucket, mime_type, size_bytes")
+            .eq("doc_id", doc_id)
+            .eq("user_id", user_id)
+            .order("chunk_index")
+            .execute()
+        )
+
+        chunks = chunks_result.data or []
+
+        # Get filename and mime_type from first chunk's storage_path
+        filename = None
+        mime_type = None
+        if chunks:
+            first_chunk = chunks[0]
+            mime_type = first_chunk.get("mime_type")
+
+            # Extract filename from storage_path (format: uploads/uuid_filename.ext)
+            storage_path = first_chunk.get("storage_path", "")
+            if storage_path:
+                # Get the last part after the last slash
+                path_parts = storage_path.split("/")
+                if path_parts:
+                    # Remove UUID prefix (format: uuid_filename.ext)
+                    filename_with_uuid = path_parts[-1]
+                    # Split on first underscore to remove UUID
+                    if "_" in filename_with_uuid:
+                        filename = filename_with_uuid.split("_", 1)[1]
+                    else:
+                        filename = filename_with_uuid
+
+        results.append({
+            "doc_id": doc_id,
+            "filename": filename,
+            "group_id": doc.get("group_id"),
+            "tags": tag_data["tags"],
+            "avg_confidence": avg_conf,
+            "chunks": chunks,
+            "text_chunks": len([c for c in chunks if c["modality"] == "text"]),
+            "image_chunks": len([c for c in chunks if c["modality"] == "image"])
+        })
 
     # Sort by average confidence
     results.sort(key=lambda x: x["avg_confidence"], reverse=True)
 
+    # Limit results
+    results = results[:request.limit]
+
     return SearchByTagsResponse(results=results, count=len(results))
+
+
+@router.get("/tags/available")
+async def get_available_document_tags(
+    user: AuthUser = Depends(get_current_user)
+):
+    """
+    Get all available document tags organized by category.
+
+    Returns the complete tag taxonomy from document_labels.json.
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    # Load document_labels.json
+    config_path = Path(__file__).parent.parent / "config" / "document_labels.json"
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            labels_data = json.load(f)
+
+        return {
+            "categories": labels_data.get("categories", {})
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load tag taxonomy: {str(e)}")
+
+
+@router.get("/tags/user-tags")
+async def get_user_document_tags(
+    group_by_category: bool = True,
+    tag_type: str = "document",
+    user: AuthUser = Depends(get_current_user)
+):
+    """
+    Get all tags that exist in the user's documents or images.
+
+    Returns only tags that have been assigned to at least one document/image.
+
+    Query Parameters:
+    - group_by_category: Group tags by category (default: true)
+    - tag_type: Type of tags to fetch - "document" or "image" (default: "document")
+    """
+    user_id = user.id
+    supabase = get_supabase()
+
+    # Build query based on tag type
+    query = (
+        supabase.table("app_image_tags")
+        .select("tag_name, category, confidence")
+        .eq("user_id", user_id)
+        .eq("tag_type", tag_type)
+    )
+
+    # For document tags, only get document-level tags (chunk_id IS NULL)
+    # For image tags, get chunk-level tags (chunk_id IS NOT NULL)
+    if tag_type == "document":
+        query = query.is_("chunk_id", "null")
+    else:
+        query = query.not_.is_("chunk_id", "null")
+
+    tags_result = query.execute()
+    tags_data = tags_result.data or []
+
+    if not group_by_category:
+        # Return flat list of unique tags
+        unique_tags = list(set(tag["tag_name"] for tag in tags_data))
+        return {
+            "tags": sorted(unique_tags),
+            "count": len(unique_tags)
+        }
+
+    # Group by category
+    categories: Dict[str, List[str]] = {}
+    for tag in tags_data:
+        category = tag.get("category") or "uncategorized"
+        tag_name = tag["tag_name"]
+
+        if category not in categories:
+            categories[category] = []
+
+        if tag_name not in categories[category]:
+            categories[category].append(tag_name)
+
+    # Sort tags within each category
+    for category in categories:
+        categories[category].sort()
+
+    return {
+        "categories": categories,
+        "total_unique_tags": sum(len(tags) for tags in categories.values())
+    }

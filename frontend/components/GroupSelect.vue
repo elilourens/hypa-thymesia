@@ -55,7 +55,6 @@ onMounted(refresh)
       :items="options"
       value-key="value"
       :placeholder="props.placeholder ?? 'Select group…'"
-      :loading="loading"
       :search-input="{ placeholder: 'Search groups…' }"
       icon="i-lucide-users"
       class="w-72"
