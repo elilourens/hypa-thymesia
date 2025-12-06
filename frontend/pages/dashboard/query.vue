@@ -241,7 +241,7 @@ async function run() {
       <!-- Tag-based search -->
       <div v-else class="space-y-4">
         <!-- Document/Image Toggle -->
-        <div class="flex justify-center gap-2">
+        <div class="flex gap-2">
           <UButton
             :variant="tagSearchMode === 'document' ? 'solid' : 'outline'"
             @click="tagSearchMode = 'document'"
@@ -257,6 +257,7 @@ async function run() {
         </div>
 
         <div class="flex flex-col gap-4">
+          <!-- Document tags: category dropdown -->
           <USelectMenu
             v-if="tagSearchMode === 'document'"
             v-model="selectedCategory"
@@ -268,33 +269,34 @@ async function run() {
             clearable
           />
 
-          <USelectMenu
-            v-model="selectedTags"
-            :items="tagOptions"
-            value-key="value"
-            :placeholder="tagSearchMode === 'document' ? 'Browse tags...' : 'Browse image tags...'"
-            class="w-full"
-            multiple
-            searchable
-            :disabled="(tagSearchMode === 'document' && !selectedCategory) || loadingTags"
-            :search-input="{ placeholder: 'Search tags...' }"
-          >
-            <template #default>
-              <span class="text-muted truncate">
-                {{ tagSearchMode === 'document' ? 'Browse tags...' : 'Browse image tags...' }}
-              </span>
-            </template>
-            <template #empty>
-              <span class="text-muted">
-                {{ tagSearchMode === 'document'
-                  ? (selectedCategory ? 'No tags available' : 'Select a category first')
-                  : 'No image tags available'
-                }}
-              </span>
-            </template>
-          </USelectMenu>
+          <!-- Tags dropdown + Search button on same row -->
+          <div class="flex gap-4">
+            <USelectMenu
+              v-model="selectedTags"
+              :items="tagOptions"
+              value-key="value"
+              :placeholder="tagSearchMode === 'document' ? 'Browse tags...' : 'Browse image tags...'"
+              class="flex-1"
+              multiple
+              searchable
+              :disabled="(tagSearchMode === 'document' && !selectedCategory) || loadingTags"
+              :search-input="{ placeholder: 'Search tags...' }"
+            >
+              <template #default>
+                <span class="text-muted truncate">
+                  {{ tagSearchMode === 'document' ? 'Browse tags...' : 'Browse image tags...' }}
+                </span>
+              </template>
+              <template #empty>
+                <span class="text-muted">
+                  {{ tagSearchMode === 'document'
+                    ? (selectedCategory ? 'No tags available' : 'Select a category first')
+                    : 'No image tags available'
+                  }}
+                </span>
+              </template>
+            </USelectMenu>
 
-          <div class="flex justify-center">
             <UButton :disabled="loading || !selectedTags.length" @click="run">
               {{ loading ? 'Searching…' : 'Search' }}
             </UButton>
