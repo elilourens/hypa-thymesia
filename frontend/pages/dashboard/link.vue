@@ -30,7 +30,8 @@ const {
   linkGoogleAccount,
   unlinkGoogle,
   fetchGoogleDriveFiles,
-  ingestGoogleDriveFile
+  ingestGoogleDriveFile,
+  saveProviderTokensFromSession
 } = useGoogleDrive()
 
 const client = useSupabaseClient()
@@ -64,6 +65,9 @@ function getSelectedFiles(): GoogleDriveFile[] {
 function prettyMime(mime?: string): string {
   if (!mime) return '—'
   if (mime.includes('pdf')) return 'PDF'
+  if (mime === 'application/vnd.google-apps.document') return 'Google Doc'
+  if (mime === 'application/vnd.google-apps.spreadsheet') return 'Google Sheet'
+  if (mime === 'application/vnd.google-apps.presentation') return 'Google Slides'
   if (mime.includes('document')) return 'Document'
   if (mime.includes('spreadsheet')) return 'Spreadsheet'
   if (mime.includes('presentation')) return 'Presentation'
@@ -190,13 +194,36 @@ async function handleLinkGoogle() {
     const { data: { session } } = await client.auth.getSession()
     if (!session?.access_token) throw new Error('No session')
 
-    // Trigger twice to ensure it works
-    await linkGoogleAccount(client, session.access_token)
-    
-    // Small delay then trigger again
-    await new Promise(resolve => setTimeout(resolve, 500))
+    // First, try to unlink any existing Google identity
+    try {
+      console.log('[Link] Checking for existing Google identity...')
+      const identitiesResult = await client.auth.getUserIdentities()
+
+      let identities: any[] = []
+      if (identitiesResult?.data?.identities) {
+        identities = identitiesResult.data.identities
+      } else if (Array.isArray(identitiesResult)) {
+        identities = identitiesResult
+      }
+
+      const googleIdentity = identities.find((id: any) => id.provider === 'google')
+
+      if (googleIdentity) {
+        console.log('[Link] Found existing Google identity, unlinking first...')
+        await client.auth.unlinkIdentity(googleIdentity)
+        console.log('[Link] Successfully unlinked existing identity')
+        // Small delay to let Supabase process the unlink
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    } catch (unlinkErr) {
+      console.log('[Link] No existing identity to unlink or unlink failed:', unlinkErr)
+      // Continue anyway - maybe there was no existing identity
+    }
+
+    // Now link the Google account
     await linkGoogleAccount(client, session.access_token)
   } catch (err) {
+    console.error('[Link] Error:', err)
     toast.add({
       title: 'Link failed',
       description: error.value || 'Failed to link Google account',
@@ -307,7 +334,10 @@ async function handleImportFiles() {
           'text/markdown',
           'image/png',
           'image/jpeg',
-          'image/webp'
+          'image/webp',
+          'application/vnd.google-apps.document',
+          'application/vnd.google-apps.spreadsheet',
+          'application/vnd.google-apps.presentation'
         ]
 
         const isSupported = file.mimeType && (
@@ -398,10 +428,23 @@ watch([filenameQuery], () => {
 onMounted(async () => {
   try {
     const { data: { session } } = await client.auth.getSession()
+
+    // Try to save provider tokens from session (after OAuth redirect)
+    const tokensSaved = await saveProviderTokensFromSession(client)
+
+    if (tokensSaved) {
+      toast.add({
+        title: 'Google account linked!',
+        description: 'Your Google Drive is now connected',
+        color: 'success',
+        icon: 'i-lucide-check'
+      })
+    }
+
     if (session?.access_token) {
       // Check if Google is linked
       await checkGoogleLinked(session.access_token)
-      
+
       // If linked, fetch files
       if (googleLinked.value) {
         await fetchGoogleDriveFiles(session.access_token)
@@ -410,6 +453,14 @@ onMounted(async () => {
     }
   } catch (err) {
     console.error('Initialization error:', err)
+    if (error.value) {
+      toast.add({
+        title: 'Error',
+        description: error.value,
+        color: 'error',
+        icon: 'i-lucide-alert-circle'
+      })
+    }
   } finally {
     initializing.value = false
   }

@@ -60,12 +60,57 @@ export const useGoogleDrive = () => {
       )
 
       if (!response.ok) {
-        throw new Error('Failed to save token')
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to save token')
       }
 
       googleLinked.value = true
+      success.value = 'Google account linked successfully!'
     } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to save token'
       throw err
+    }
+  }
+
+  /**
+   * Check if we have provider tokens in session and save them.
+   * Called on page mount after OAuth redirect.
+   */
+  const saveProviderTokensFromSession = async (
+    supabaseClient: any
+  ): Promise<boolean> => {
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession()
+
+      console.log('[useGoogleDrive] Checking session for provider tokens:', {
+        hasSession: !!session,
+        hasAccessToken: !!session?.access_token,
+        hasProviderToken: !!(session as any)?.provider_token,
+        hasRefreshToken: !!(session as any)?.provider_refresh_token
+      })
+
+      // If we have provider tokens, save them
+      if (session && (session as any)?.provider_token) {
+        console.log('[useGoogleDrive] Found provider tokens in session, saving...')
+
+        const googleTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+
+        await saveGoogleToken(
+          session.access_token!,
+          (session as any).provider_token,
+          (session as any).provider_refresh_token,
+          googleTokenExpiresAt
+        )
+
+        console.log('[useGoogleDrive] Tokens saved successfully from session!')
+        return true
+      }
+
+      return false
+    } catch (err) {
+      console.error('[useGoogleDrive] Error saving tokens from session:', err)
+      error.value = 'Failed to save OAuth tokens'
+      return false
     }
   }
 
@@ -93,24 +138,24 @@ export const useGoogleDrive = () => {
           // When linking (not signing in), we get provider_token in the session
           if (session?.provider_token) {
             try {
-              const { data: { session: currentSession } } = 
+              const { data: { session: currentSession } } =
                 await supabaseClient.auth.getSession()
 
               if (!currentSession?.access_token) {
                 throw new Error('No session access token')
               }
 
-              // Calculate expiration time
-              const expiresAt = session.expires_at
-                ? new Date(session.expires_at * 1000).toISOString()
-                : undefined
+              // Calculate Google token expiration time (typically 1 hour = 3600 seconds)
+              // The session.expires_at is for Supabase session, not Google token
+              // Google tokens typically expire in 3600 seconds (1 hour)
+              const googleTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
 
               // Save tokens to backend
               await saveGoogleToken(
                 currentSession.access_token,
                 session.provider_token,
                 session.provider_refresh_token,
-                expiresAt
+                googleTokenExpiresAt
               )
 
               success.value = 'Google account linked successfully!'
@@ -385,7 +430,7 @@ export const useGoogleDrive = () => {
     loading: computed(() => loading.value),
     files: computed(() => [...files.value]), // Spread to ensure mutability
     googleLinked: computed(() => googleLinked.value),
-    
+
     // Computed
     isInitialized: computed(() => hasCheckedLink.value),
 
@@ -395,6 +440,7 @@ export const useGoogleDrive = () => {
     unlinkGoogle,
     fetchGoogleDriveFiles,
     saveGoogleToken,
-    ingestGoogleDriveFile
+    ingestGoogleDriveFile,
+    saveProviderTokensFromSession
   }
 }

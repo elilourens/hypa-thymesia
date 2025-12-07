@@ -114,7 +114,7 @@ def _refresh_access_token(
         new_access_token = token_data.get("access_token")
         expires_in = token_data.get("expires_in", 3600)
         # Use timezone-aware datetime
-        expires_at = (datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(seconds=expires_in)).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
         
         # Update token in database
         supabase_client.table("user_oauth_tokens").update({
@@ -160,11 +160,8 @@ def _get_valid_access_token(
             else:
                 expires_dt = expires_at
 
-            # Make current time timezone-aware if expires_dt is aware
-            now = datetime.utcnow()
-            if expires_dt.tzinfo is not None:
-                from datetime import timezone
-                now = now.replace(tzinfo=timezone.utc)
+            # Use timezone-aware datetime
+            now = datetime.now(timezone.utc)
 
             if now >= expires_dt - timedelta(minutes=5):
                 if not refresh_token:
