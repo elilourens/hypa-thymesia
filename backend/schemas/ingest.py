@@ -8,9 +8,10 @@ class QueryRequest(BaseModel):
     query_text: Optional[str] = None
     image_b64: Optional[str] = None
     top_k: int = Field(default=10, ge=1, le=200)
-    route: Optional[str] = None  # "text" | "image" | None
+    route: Optional[str] = None  # "text" | "image" | "extracted_image" | None
     group_id: Optional[str] = None
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)  # slider (0=embeddings only, 1=BM25 only)
+    search_mode: Optional[str] = Field(default="smart", pattern="^(smart|keyword)$")  # "smart" (embedding) or "keyword"
 
 
 class QueryMatch(BaseModel):

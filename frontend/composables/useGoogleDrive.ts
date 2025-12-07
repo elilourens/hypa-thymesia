@@ -124,7 +124,8 @@ export const useGoogleDrive = () => {
    */
   const linkGoogleAccount = async (
     supabaseClient: any,
-    supabaseAccessToken: string
+    supabaseAccessToken: string,
+    forceConsent: boolean = false
   ): Promise<void> => {
     error.value = ''
     success.value = ''
@@ -174,6 +175,15 @@ export const useGoogleDrive = () => {
 
       subscription = data.subscription
 
+      // Build query params - add prompt: 'consent' if forcing or if we need refresh token
+      const queryParams: any = {
+        access_type: 'offline' // Always request refresh token
+      }
+
+      if (forceConsent) {
+        queryParams.prompt = 'consent' // Force consent screen to ensure refresh token
+      }
+
       // Initiate the OAuth link with Supabase
       const { error: linkError } = await supabaseClient.auth.linkIdentity({
         provider: 'google',
@@ -183,10 +193,7 @@ export const useGoogleDrive = () => {
             'https://www.googleapis.com/auth/drive.readonly',
             'https://www.googleapis.com/auth/drive.metadata.readonly'
           ],
-          queryParams: {
-            access_type: 'offline', // Request refresh token
-            //prompt: 'consent'
-          }
+          queryParams
         }
       })
 
@@ -306,6 +313,32 @@ export const useGoogleDrive = () => {
   }
 
   /**
+   * Check if user needs to consent to get refresh token.
+   * Returns true if user should be prompted with consent screen.
+   */
+  const checkNeedsConsent = async (
+    supabaseAccessToken: string
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch(
+        'http://localhost:8000/api/v1/google-needs-consent',
+        {
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      const data = await response.json()
+      return data.needs_consent || false
+    } catch (err) {
+      console.error('Error checking consent need:', err)
+      return false
+    }
+  }
+
+  /**
    * Fetch files from Google Drive with pagination support.
    * Backend automatically handles token refresh.
    */
@@ -339,20 +372,9 @@ export const useGoogleDrive = () => {
       )
 
       if (response.status === 401) {
-        error.value = 'Google token expired. Attempting to relink...'
+        error.value = 'Google token expired or invalid. Please relink your account.'
         googleLinked.value = false
-        
-        // Auto-retry link to refresh token
-        try {
-          const supabaseClient = useSupabaseClient()
-          await linkGoogleAccount(supabaseClient, supabaseAccessToken)
-          
-          // Wait a moment then retry the fetch
-          await new Promise(resolve => setTimeout(resolve, 1000))
-          return fetchGoogleDriveFiles(supabaseAccessToken, pageSize, pageToken)
-        } catch (linkErr) {
-          throw new Error('Token expired and relink failed. Please link manually.')
-        }
+        return { files: [] }
       }
 
       if (!response.ok) {
@@ -436,6 +458,7 @@ export const useGoogleDrive = () => {
 
     // Methods
     checkGoogleLinked,
+    checkNeedsConsent,
     linkGoogleAccount,
     unlinkGoogle,
     fetchGoogleDriveFiles,

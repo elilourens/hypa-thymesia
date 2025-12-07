@@ -18,6 +18,9 @@ const results = ref<any[]>([])
 // Group selection
 const selectedGroup = ref<string | null>(null) // null = All groups
 
+// Search mode for text search
+const searchMode = ref<'smart' | 'keyword'>('smart') // NEW: smart or keyword search
+
 // Tag-based search
 const tagSearchMode = ref<'document' | 'image'>('document') // NEW: toggle between doc/image tags
 const selectedTags = ref<string[]>([])
@@ -197,7 +200,8 @@ async function run() {
         query: queryTextInput.value,
         route,
         top_k: 10,
-        group_id
+        group_id,
+        search_mode: searchMode.value // Pass search mode to backend
       })
 
       results.value = r.matches || []
@@ -321,8 +325,26 @@ async function run() {
         </div>
       </div>
 
-      <!-- Group filter -->
-      <div class="flex justify-end">
+      <!-- Smart/Keyword toggle + Group filter row -->
+      <div class="flex justify-between items-center gap-4">
+        <!-- Smart vs Keyword toggle (only for text search) -->
+        <div v-if="queryRoute === 'text'" class="flex gap-2">
+          <UButton
+            :variant="searchMode === 'smart' ? 'solid' : 'outline'"
+            @click="searchMode = 'smart'"
+          >
+            Smart Search
+          </UButton>
+          <UButton
+            :variant="searchMode === 'keyword' ? 'solid' : 'outline'"
+            @click="searchMode = 'keyword'"
+          >
+            Keyword Search
+          </UButton>
+        </div>
+        <div v-else></div>
+
+        <!-- Group filter -->
         <GroupSelect v-model="selectedGroup" includeAll includeNoGroup />
       </div>
 

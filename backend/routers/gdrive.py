@@ -151,6 +151,11 @@ def _get_valid_access_token(
     expires_at = token_record.get("expires_at")
     refresh_token = token_record.get("refresh_token")
 
+    # Log token state for debugging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Token check: has_refresh_token={bool(refresh_token)}, expires_at={expires_at}")
+
     # Check if token is expired or expiring soon (within 5 minutes)
     if expires_at:
         try:
@@ -162,24 +167,32 @@ def _get_valid_access_token(
 
             # Use timezone-aware datetime
             now = datetime.now(timezone.utc)
+            logger.info(f"Token expiry check: now={now}, expires={expires_dt}, is_expired={now >= expires_dt - timedelta(minutes=5)}")
 
             if now >= expires_dt - timedelta(minutes=5):
                 if not refresh_token:
+                    logger.error("Token expired but no refresh token available")
                     raise HTTPException(
                         status_code=401,
-                        detail="Token expired and no refresh token available"
+                        detail="Token expired and no refresh token available. Please relink your Google account."
                     )
 
                 # Refresh the token
+                logger.info("Refreshing access token...")
                 access_token = _refresh_access_token(
                     refresh_token,
                     supabase_client,
                     user_id,
                     google_credentials
                 )
+                logger.info("Token refreshed successfully")
+        except HTTPException:
+            raise
         except Exception as e:
+            logger.warning(f"Error checking token expiry: {e}")
             # If datetime parsing fails, assume token is expired
             if refresh_token:
+                logger.info("Attempting to refresh token due to parsing error...")
                 access_token = _refresh_access_token(
                     refresh_token,
                     supabase_client,
@@ -187,9 +200,10 @@ def _get_valid_access_token(
                     google_credentials
                 )
             else:
+                logger.error("Token may be expired and no refresh token available")
                 raise HTTPException(
                     status_code=401,
-                    detail="Token expired and no refresh token available"
+                    detail="Token expired and no refresh token available. Please relink your Google account."
                 )
 
     return access_token
@@ -269,18 +283,55 @@ async def save_google_token(
         )
 
 
-@router.get("/google-linked")
-async def check_google_linked(
+@router.get("/google-needs-consent")
+async def check_google_needs_consent(
     auth: AuthUser = Depends(get_current_user),
     supabase_client=Depends(get_supabase_client)
 ):
-    """Check if user has a Google account linked"""
+    """
+    Check if user needs to consent to get a refresh token.
+    Returns True if user has a token but no refresh token.
+    """
     try:
         token_record = _get_stored_token(auth.id, supabase_client)
-        
-        return {
-            "linked": token_record is not None
-        }
+
+        if not token_record:
+            return {"needs_consent": False}  # No token at all, normal flow
+
+        # Check if we have a refresh token
+        has_refresh_token = bool(token_record.get("refresh_token"))
+
+        return {"needs_consent": not has_refresh_token}
+    except Exception:
+        return {"needs_consent": False}
+
+
+@router.get("/google-linked")
+async def check_google_linked(
+    auth: AuthUser = Depends(get_current_user),
+    supabase_client=Depends(get_supabase_client),
+    google_credentials: dict = Depends(get_google_credentials)
+):
+    """
+    Check if user has a valid Google account linked.
+    Attempts to refresh token if expired.
+    Returns linked=false only if no token or refresh fails.
+    """
+    try:
+        # Try to get a valid token (will auto-refresh if needed)
+        _get_valid_access_token(
+            auth.id,
+            supabase_client,
+            google_credentials
+        )
+        return {"linked": True}
+    except HTTPException as e:
+        # If 401 (no refresh token), return not linked
+        # If 404 (no token at all), return not linked
+        if e.status_code in [401, 404]:
+            return {"linked": False}
+        # Other errors, assume not linked to be safe
+        return {"linked": False}
     except Exception:
         return {"linked": False}
 

@@ -154,3 +154,134 @@ def update_vectors_metadata(
             index.update(id=vid, set_metadata=set_metadata, namespace=ns)
         if delete_keys:
             index.update(id=vid, delete_metadata=delete_keys, namespace=ns)
+
+def keyword_search_text(
+    *,
+    keywords: str,
+    top_k: int = 10,
+    namespace: Optional[str] = None,
+    metadata_filter: Optional[Dict[str, Any]] = None,
+):
+    """
+    Perform keyword search on text chunks using Pinecone's fetch_by_metadata API.
+
+    Uses Pinecone's early-access fetch_by_metadata endpoint to retrieve vectors
+    by metadata filters only, then filters by exact keyword matches.
+
+    Args:
+        keywords: Search keywords (will be matched case-insensitive in text field)
+        top_k: Number of results to return
+        namespace: User namespace
+        metadata_filter: Additional metadata filters (e.g., group_id)
+
+    Returns:
+        Query result object with matches containing keyword-matched chunks
+    """
+    import requests
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Get index host using describe_index
+    index_info = pc.describe_index(TEXT_INDEX_NAME)
+    index_host = index_info.host  # e.g., "myindex-abc123.svc.us-east1-gcp.pinecone.io"
+
+    # Build fetch_by_metadata request
+    # Fetch more than needed since we'll filter by keywords
+    fetch_limit = min(top_k * 100, 10000)
+
+    headers = {
+        "Api-Key": _PINECONE_KEY,
+        "Content-Type": "application/json",
+        "X-Pinecone-API-Version": "2025-10"  # Required for early-access features
+    }
+
+    body = {
+        "limit": fetch_limit
+    }
+
+    if namespace:
+        body["namespace"] = namespace
+
+    # fetch_by_metadata requires a filter - use modality=text as base filter
+    # and merge with any user-provided metadata_filter
+    base_filter = {"modality": {"$eq": "text"}}
+
+    if metadata_filter:
+        # Combine filters using $and
+        body["filter"] = {"$and": [base_filter, metadata_filter]}
+    else:
+        body["filter"] = base_filter
+
+    logger.info(f"[Keyword Search] Fetching from Pinecone using fetch_by_metadata API (host={index_host}, filter={body['filter']})")
+
+    # Make direct API call to fetch_by_metadata
+    try:
+        response = requests.post(
+            f"https://{index_host}/vectors/fetch_by_metadata",
+            headers=headers,
+            json=body,
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"[Keyword Search] HTTP error: {e.response.status_code} - {e.response.text}")
+        raise
+    except Exception as e:
+        logger.error(f"[Keyword Search] Request failed: {e}")
+        raise
+
+    # Extract vectors from response
+    # Response format: {"vectors": [{"id": "...", "values": [...], "metadata": {...}}, ...]}
+    vectors = data.get("vectors", [])
+
+    logger.info(f"[Keyword Search] Received {len(vectors)} vectors from fetch_by_metadata")
+
+    # Filter results by keyword matches in the 'text' field
+    keywords_lower = keywords.lower().strip()
+    keyword_terms = keywords_lower.split()
+
+    matched_results = []
+    for vector in vectors:
+        metadata = vector.get("metadata", {})
+        text_content = metadata.get("text", "")
+
+        if not text_content:
+            continue
+
+        text_lower = text_content.lower()
+
+        # Check if ALL keywords appear in the text (AND logic)
+        if all(term in text_lower for term in keyword_terms):
+            # Calculate relevance score based on keyword frequency
+            score = sum(text_lower.count(term) for term in keyword_terms)
+            # Normalize by text length to avoid bias toward longer texts
+            score = score / max(len(text_content.split()), 1)
+
+            # Create match object in same format as query results
+            match = {
+                "id": vector.get("id", ""),
+                "score": score,
+                "metadata": metadata
+            }
+
+            matched_results.append(match)
+
+    logger.info(f"[Keyword Search] Found {len(matched_results)} keyword matches")
+
+    # Sort by relevance score (descending)
+    matched_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # Limit to top_k results
+    matched_results = matched_results[:top_k]
+
+    logger.info(f"[Keyword Search] Returning {len(matched_results)} results")
+    if matched_results:
+        logger.info(f"[Keyword Search] Sample result: id={matched_results[0].get('id')[:50]}, score={matched_results[0].get('score')}, has_metadata={bool(matched_results[0].get('metadata'))}")
+
+    # Return in the same format as query_vectors
+    class KeywordSearchResult:
+        def __init__(self, matches):
+            self.matches = matches
+
+    return KeywordSearchResult(matched_results)

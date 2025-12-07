@@ -5,7 +5,7 @@ from core.config import get_settings
 from core.deps import get_supabase
 from schemas.ingest import QueryRequest, QueryResponse, QueryMatch
 from embed.embeddings import embed_texts, embed_images, embed_clip_texts
-from data_upload.pinecone_services import query_vectors
+from data_upload.pinecone_services import query_vectors, keyword_search_text
 
 # extra utils
 from scripts.highlighting import find_highlights
@@ -43,31 +43,6 @@ async def query_endpoint(
         else:
             chosen_route = req.route
 
-    # --- Embeddings ---
-    if chosen_route == "text":
-        vec = (await embed_texts([req.query_text]))[0]
-        modality_arg = "text"
-    elif chosen_route == "image":
-        if req.image_b64 is not None:
-            try:
-                img_bytes = base64.b64decode(req.image_b64)
-            except Exception:
-                raise HTTPException(422, detail="image_b64 is not valid base64.")
-            vec = (await embed_images([img_bytes]))[0]
-            modality_arg = "image"
-        else:
-            vec = (await embed_clip_texts([req.query_text]))[0]
-            modality_arg = "clip_text"
-    elif chosen_route == "extracted_image":  # NEW
-        # Search extracted images using text query
-        if req.query_text:
-            vec = (await embed_clip_texts([req.query_text]))[0]
-            modality_arg = "extracted_image"
-        else:
-            raise HTTPException(422, detail="extracted_image route requires query_text")
-    else:
-        raise HTTPException(500, detail="Internal routing error")
-
     # --- Group filter ---
     meta_filter = None
     if req.group_id is not None:
@@ -81,18 +56,59 @@ async def query_endpoint(
         else:
             meta_filter = {"group_id": {"$eq": req.group_id}}
 
-    # --- Pinecone query ---
-    try:
-        result = query_vectors(
-            vector=vec,
-            modality=modality_arg,
-            top_k=req.top_k,
-            namespace=user_id,
-            metadata_filter=meta_filter,
-            include_metadata=True,
-        )
-    except Exception as e:
-        raise HTTPException(500, detail=f"Pinecone query failed: {e}")
+    # --- Keyword search mode (text only) ---
+    if req.search_mode == "keyword" and chosen_route == "text":
+        if not req.query_text:
+            raise HTTPException(422, detail="Keyword search requires query_text")
+
+        try:
+            result = keyword_search_text(
+                keywords=req.query_text,
+                top_k=req.top_k,
+                namespace=user_id,
+                metadata_filter=meta_filter,
+            )
+        except Exception as e:
+            raise HTTPException(500, detail=f"Keyword search failed: {e}")
+    # --- Smart search mode (embedding-based) ---
+    else:
+        # --- Embeddings ---
+        if chosen_route == "text":
+            vec = (await embed_texts([req.query_text]))[0]
+            modality_arg = "text"
+        elif chosen_route == "image":
+            if req.image_b64 is not None:
+                try:
+                    img_bytes = base64.b64decode(req.image_b64)
+                except Exception:
+                    raise HTTPException(422, detail="image_b64 is not valid base64.")
+                vec = (await embed_images([img_bytes]))[0]
+                modality_arg = "image"
+            else:
+                vec = (await embed_clip_texts([req.query_text]))[0]
+                modality_arg = "clip_text"
+        elif chosen_route == "extracted_image":  # NEW
+            # Search extracted images using text query
+            if req.query_text:
+                vec = (await embed_clip_texts([req.query_text]))[0]
+                modality_arg = "extracted_image"
+            else:
+                raise HTTPException(422, detail="extracted_image route requires query_text")
+        else:
+            raise HTTPException(500, detail="Internal routing error")
+
+        # --- Pinecone query ---
+        try:
+            result = query_vectors(
+                vector=vec,
+                modality=modality_arg,
+                top_k=req.top_k,
+                namespace=user_id,
+                metadata_filter=meta_filter,
+                include_metadata=True,
+            )
+        except Exception as e:
+            raise HTTPException(500, detail=f"Pinecone query failed: {e}")
 
     # --- Build matches with highlighting ---
     matches = []
@@ -160,8 +176,8 @@ async def query_endpoint(
             )
         )
 
-    # --- BM25 re-ranking (text only) ---
-    if req.query_text and chosen_route == "text":
+    # --- BM25 re-ranking (text only, smart search mode only) ---
+    if req.query_text and chosen_route == "text" and req.search_mode == "smart":
         matches = rerank_with_bm25(req.query_text, matches, req.bm25_weight)
 
     return QueryResponse(

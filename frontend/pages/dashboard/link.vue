@@ -27,6 +27,7 @@ const {
   googleLinked,
   isInitialized,
   checkGoogleLinked,
+  checkNeedsConsent,
   linkGoogleAccount,
   unlinkGoogle,
   fetchGoogleDriveFiles,
@@ -194,6 +195,10 @@ async function handleLinkGoogle() {
     const { data: { session } } = await client.auth.getSession()
     if (!session?.access_token) throw new Error('No session')
 
+    // Check if we need to force consent to get refresh token
+    const needsConsent = await checkNeedsConsent(session.access_token)
+    console.log('[Link] Needs consent for refresh token:', needsConsent)
+
     // First, try to unlink any existing Google identity
     try {
       console.log('[Link] Checking for existing Google identity...')
@@ -220,8 +225,8 @@ async function handleLinkGoogle() {
       // Continue anyway - maybe there was no existing identity
     }
 
-    // Now link the Google account
-    await linkGoogleAccount(client, session.access_token)
+    // Now link the Google account with consent if needed
+    await linkGoogleAccount(client, session.access_token, needsConsent)
   } catch (err) {
     console.error('[Link] Error:', err)
     toast.add({

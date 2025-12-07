@@ -38,6 +38,7 @@ export function useIngest() {
   type TextQueryOpts = BaseQueryOpts & {
     query: string
     route: 'text' | 'image' | 'extracted_image' // UPDATED
+    search_mode?: 'smart' | 'keyword' // NEW: search mode for text queries
   }
   type ImageQueryOpts = BaseQueryOpts & { file: File }
 
@@ -81,6 +82,7 @@ export function useIngest() {
           route: opts.route,
           top_k: opts.top_k ?? 10,
           group_id: opts.group_id ?? undefined,
+          search_mode: opts.search_mode ?? 'smart', // Default to smart search
         },
       })
     } catch (err: any) {
