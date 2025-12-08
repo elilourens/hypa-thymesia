@@ -7,10 +7,6 @@ from schemas.ingest import QueryRequest, QueryResponse, QueryMatch
 from embed.embeddings import embed_texts, embed_images, embed_clip_texts
 from data_upload.pinecone_services import query_vectors, keyword_search_text
 
-# extra utils
-from scripts.highlighting import find_highlights
-from scripts.bm25_reranker import rerank_with_bm25
-
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 
@@ -110,10 +106,14 @@ async def query_endpoint(
         except Exception as e:
             raise HTTPException(500, detail=f"Pinecone query failed: {e}")
 
-    # --- Build matches with highlighting ---
+    # --- Build matches ---
     matches = []
-    for m in getattr(result, "matches", []) or []:
-        md = m["metadata"] if isinstance(m, dict) else getattr(m, "metadata", {}) or {}
+
+    # Handle both dict from keyword_search_text and object from query_vectors
+    result_matches = result.get("matches") if isinstance(result, dict) else getattr(result, "matches", [])
+
+    for m in result_matches or []:
+        md = m.get("metadata") if isinstance(m, dict) else getattr(m, "metadata", {}) or {}
 
         # keep only bucket & path for later use by /storage/signed-url
         bucket = md.get("bucket")
@@ -127,23 +127,21 @@ async def query_endpoint(
                 "storage_path": storage_path,
                 "parent_filename": md.get("parent_filename"),
                 "parent_storage_path": md.get("parent_storage_path"),
+                "parent_bucket": md.get("parent_bucket"),
                 "page_number": md.get("page_number"),
                 "public_url": md.get("public_url"),  # Direct image URL
             }
         else:
             md = md | {"bucket": bucket, "storage_path": storage_path}
 
-        # Add highlighting for text-based metadata
-        if "text" in md and req.query_text:
-            md["highlight_spans"] = find_highlights(md["text"], req.query_text)
-
         # Add tags for image results
         if md.get("modality") == "image" and chunk_id:
             try:
                 # Query tags from database
+                # Limit to top 3 most confident tags
                 tags_result = supabase.table("app_image_tags").select("tag_name, confidence, bbox").eq(
                     "chunk_id", chunk_id
-                ).eq("user_id", user_id).eq("tag_type", "image").eq("verified", True).order("confidence", desc=True).execute()
+                ).eq("user_id", user_id).eq("tag_type", "image").eq("verified", True).order("confidence", desc=True).limit(3).execute()
 
                 if tags_result.data:
                     md["tags"] = tags_result.data
@@ -158,9 +156,10 @@ async def query_endpoint(
             if doc_id:
                 try:
                     # Query document-level tags from database (chunk_id IS NULL)
+                    # Limit to top 3 most confident tags
                     tags_result = supabase.table("app_image_tags").select("tag_name, confidence, category, reasoning").eq(
                         "doc_id", doc_id
-                    ).eq("user_id", user_id).eq("tag_type", "document").is_("chunk_id", "null").order("confidence", desc=True).limit(10).execute()
+                    ).eq("user_id", user_id).eq("tag_type", "document").is_("chunk_id", "null").order("confidence", desc=True).limit(3).execute()
 
                     if tags_result.data:
                         md["tags"] = tags_result.data
@@ -175,10 +174,6 @@ async def query_endpoint(
                 metadata=md,
             )
         )
-
-    # --- BM25 re-ranking (text only, smart search mode only) ---
-    if req.query_text and chosen_route == "text" and req.search_mode == "smart":
-        matches = rerank_with_bm25(req.query_text, matches, req.bm25_weight)
 
     return QueryResponse(
         matches=matches,

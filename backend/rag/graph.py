@@ -41,7 +41,6 @@ class GraphState(TypedDict):
     query_text: Optional[str]
     top_k: Optional[int]
     group_id: Optional[str]
-    bm25_weight: Optional[float]
 
     groups: Optional[List[dict]]
     docs: Optional[str]
@@ -79,7 +78,6 @@ class QueryParams(BaseModel):
     query_text: str
     top_k: int = Field(default=3, ge=1, le=5)
     group_id: Optional[str] = None
-    bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 def clean_query(text: str) -> str:
@@ -105,18 +103,16 @@ You are a retrieval-parameter planner.
 Available groups (name → id):
 {group_list}
 
-Respond ONLY with valid JSON. All four keys must be present:
+Respond ONLY with valid JSON. All three keys must be present:
 {{
   "query_text": "cars",           // minimal topical keyword
   "top_k": 3,
-  "group_id": null,               // null if no group is specified by the user
-  "bm25_weight": 0.3
+  "group_id": null                // null if no group is specified by the user
 }}
 
 Rules:
 - query_text: a SHORT keyword/phrase (1–3 words). Drop filler like "files about", "tell me about", "what does it say".
 - top_k: 1–5
-- bm25_weight: 0–1
 - group_id: null unless the user clearly names a group
 Question:
 {question}
@@ -144,8 +140,7 @@ Question:
         parsed = QueryParams(
             query_text=data.get("query_text", state["question"]),
             top_k=data.get("top_k") or 3,
-            group_id=data.get("group_id"),
-            bm25_weight=data.get("bm25_weight") or 0.3
+            group_id=data.get("group_id")
         )
         logger.info(f"Salvaged parameters: {parsed.dict()}")
 
@@ -159,7 +154,6 @@ Question:
         "query_text": clean_query(parsed.query_text or state["question"]),
         "top_k":  3,
         "group_id": gid,  # stays None if not needed
-        "bm25_weight": parsed.bm25_weight if parsed.bm25_weight is not None else 0.3,
     }
 
 # -----------------------------------------------------------------------------
@@ -170,7 +164,6 @@ async def retrieve_docs(state: GraphState):
         "query_text": state.get("query_text"),
         "top_k": max(1, min(state.get("top_k", 3), 5)),
         "group_id": state.get("group_id"),
-        "bm25_weight": state.get("bm25_weight", 0.3),
         "route": "text"
     }
     headers = {"Authorization": f"Bearer {state.get('jwt')}"} if state.get("jwt") else {}

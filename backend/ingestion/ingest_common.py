@@ -245,12 +245,16 @@ async def ingest_file_content(
             logger.info(f"Generated {len(image_vectors)} image embeddings")
 
             logger.info("Ingesting deep embed images")
+            # Extract parent bucket from storage_metadata if available
+            parent_bucket = storage_metadata.get("bucket") if storage_metadata else None
+
             images_result = ingest_deep_embed_images(
                 supabase=supabase,
                 user_id=user_id,
                 doc_id=doc_id,
                 parent_filename=filename,
                 parent_storage_path=storage_path,
+                parent_bucket=parent_bucket,
                 images_data=images_data,
                 embed_image_vectors=image_vectors,
                 embedding_model=settings.EMBED_MODEL,

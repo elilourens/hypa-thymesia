@@ -12,27 +12,6 @@ function getFileName(title?: string) {
   return title || '(unknown file)'
 }
 
-function renderHighlightedText(
-  text?: string,
-  spans?: { start: number; end: number; term: string }[]
-) {
-  if (!text) return ''
-  if (!spans?.length) return text
-
-  let out = ''
-  let last = 0
-  for (const s of [...spans].sort((a, b) => a.start - b.start)) {
-    out += text.slice(last, s.start)
-    out += `<span class="bg-primary text-black rounded px-0.5">${text.slice(
-      s.start,
-      s.end
-    )}</span>`
-    last = s.end
-  }
-  out += text.slice(last)
-  return out
-}
-
 // Builds URLs for deep linking
 function buildDeepLink(baseUrl: string, r: any) {
   const mime = r.metadata?.mime_type || ''
@@ -69,6 +48,54 @@ async function handleDownload(r: any) {
   } catch (err: any) {
     toast.add({
       title: 'Download failed',
+      description: err.message || 'Error generating signed URL',
+      color: 'error'
+    })
+  }
+}
+
+async function handleOpenParentDoc(r: any) {
+  try {
+    // Get parent bucket and storage path
+    let parentBucket = r.metadata.parent_bucket
+    let parentPath = r.metadata.parent_storage_path
+
+    // Determine file extension from parent path
+    const isImage = parentPath?.match(/\.(png|jpeg|jpg|webp)$/i)
+
+    // Infer bucket if not provided
+    if (!parentBucket && parentPath) {
+      // Check if path starts with a known prefix
+      if (parentPath.startsWith('google-drive/')) {
+        parentBucket = 'google-drive'
+        // Keep the full path including google-drive/ prefix
+      } else {
+        // For paths like "uploads/file.pdf" stored in texts/images bucket
+        // Bucket depends on file type: images go to 'images', docs go to 'texts'
+        parentBucket = isImage ? 'images' : 'texts'
+        // Keep the full path including uploads/ prefix
+      }
+    }
+
+    // Create a temporary result object with parent document info
+    const parentResult = {
+      metadata: {
+        bucket: parentBucket,
+        storage_path: parentPath, // Use the full storage path as-is
+        mime_type: r.metadata.parent_storage_path?.endsWith('.pdf')
+          ? 'application/pdf'
+          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        page_number: r.metadata.page_number
+      }
+    }
+
+    // Reuse the existing handleOpen logic
+    const url = await getSignedUrl(parentResult.metadata.bucket, parentResult.metadata.storage_path)
+    if (!url) throw new Error('No URL returned')
+    window.open(buildDeepLink(url, parentResult), '_blank')
+  } catch (err: any) {
+    toast.add({
+      title: 'Could not open parent document',
       description: err.message || 'Error generating signed URL',
       color: 'error'
     })
@@ -119,13 +146,32 @@ watch(
         </p>
 
         <!-- File info row -->
-        <div class="flex items-center justify-between text-xs text-gray-500">
-          <span>
+        <div class="flex items-center justify-between gap-4 text-xs text-gray-500">
+          <!-- Show parent document name for extracted images -->
+          <span v-if="r.metadata?.source === 'extracted' && r.metadata?.parent_filename" class="flex-1 min-w-0">
+            File: <strong>{{ r.metadata.parent_filename }}</strong>
+            <span v-if="r.metadata?.page_number" class="ml-1">(Page {{ r.metadata.page_number }})</span>
+          </span>
+          <!-- Show regular title for other results -->
+          <span v-else class="flex-1 min-w-0">
             File: <strong>{{ getFileName(r.metadata?.title) }}</strong>
           </span>
 
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <!-- For extracted images, show "Open Document" button to open parent -->
             <UButton
+              v-if="r.metadata?.source === 'extracted' && r.metadata?.parent_storage_path"
+              size="xs"
+              color="primary"
+              variant="soft"
+              icon="i-heroicons-document-text"
+              @click="handleOpenParentDoc(r)"
+            >
+              Open Document
+            </UButton>
+            <!-- For regular results, show "Open" button -->
+            <UButton
+              v-else
               size="xs"
               color="primary"
               variant="soft"
@@ -152,11 +198,7 @@ watch(
 
         <!-- Render text hits -->
         <div v-if="(r.metadata?.modality || '').toLowerCase() === 'text'">
-          <p>
-            <span
-              v-html="renderHighlightedText(r.metadata?.text, r.metadata?.highlight_spans)"
-            />
-          </p>
+          <p>{{ r.metadata?.text }}</p>
 
           <!-- Display document tags if available -->
           <div v-if="r.metadata?.tags && r.metadata.tags.length > 0" class="mt-3 space-y-2">

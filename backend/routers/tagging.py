@@ -406,6 +406,7 @@ async def get_document_tags(
     supabase = get_supabase()
 
     # Fetch document-level tags from database (chunk_id IS NULL)
+    # Limit to top 3 most confident tags
     tags_result = (
         supabase.table("app_image_tags")
         .select("tag_name, category, confidence, reasoning, verified")
@@ -414,6 +415,7 @@ async def get_document_tags(
         .eq("tag_type", "document")
         .is_("chunk_id", "null")
         .order("confidence", desc=True)
+        .limit(3)
         .execute()
     )
 

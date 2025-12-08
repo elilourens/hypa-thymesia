@@ -63,6 +63,7 @@ def ingest_deep_embed_images(
     doc_id: str,
     parent_filename: str,
     parent_storage_path: str,
+    parent_bucket: Optional[str] = None,
     images_data: List[Dict[str, Any]],
     embed_image_vectors: List[List[float]],
     embedding_model: str = "clip-ViT-B-32",
@@ -151,6 +152,7 @@ def ingest_deep_embed_images(
             "embedding_version": embedding_version,
             "parent_filename": parent_filename,
             "parent_storage_path": parent_storage_path,
+            "parent_bucket": parent_bucket,
             "dimensions": f"{img_data['width']}x{img_data['height']}",
             "upload_date": datetime.utcnow().date().isoformat(),
         }

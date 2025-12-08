@@ -42,16 +42,15 @@ export function useIngest() {
   }
   type ImageQueryOpts = BaseQueryOpts & { file: File }
 
-  type HighlightSpan = { start: number; end: number; term: string }
-
   interface Match {
     id: string
     score: number
     metadata: {
       text?: string
-      highlight_spans?: HighlightSpan[]
       source?: string // NEW: 'extracted' for deep embeds
       parent_filename?: string // NEW: parent document name
+      parent_storage_path?: string // NEW: parent document storage path
+      parent_bucket?: string // NEW: parent document bucket
       page_number?: number // NEW: page number
       public_url?: string // NEW: direct image URL
       dimensions?: string // NEW: image dimensions

@@ -192,7 +192,7 @@ def keyword_search_text(
     headers = {
         "Api-Key": _PINECONE_KEY,
         "Content-Type": "application/json",
-        "X-Pinecone-API-Version": "2025-10"  # Required for early-access features
+        "X-Pinecone-API-Version": "2024-07"  # Required for pinecone-client>=5.x
     }
 
     body = {
@@ -232,8 +232,9 @@ def keyword_search_text(
         raise
 
     # Extract vectors from response
-    # Response format: {"vectors": [{"id": "...", "values": [...], "metadata": {...}}, ...]}
-    vectors = data.get("vectors", [])
+    # Response format is a dict of vectors: {"vectors": {"id1": {...}, "id2": {...}}}
+    vector_dict = data.get("vectors", {})
+    vectors = list(vector_dict.values()) if vector_dict else []
 
     logger.info(f"[Keyword Search] Received {len(vectors)} vectors from fetch_by_metadata")
 
@@ -279,9 +280,5 @@ def keyword_search_text(
     if matched_results:
         logger.info(f"[Keyword Search] Sample result: id={matched_results[0].get('id')[:50]}, score={matched_results[0].get('score')}, has_metadata={bool(matched_results[0].get('metadata'))}")
 
-    # Return in the same format as query_vectors
-    class KeywordSearchResult:
-        def __init__(self, matches):
-            self.matches = matches
-
-    return KeywordSearchResult(matched_results)
+    # Return in a format similar to query_vectors (which is JSON-serializable)
+    return {"matches": matched_results}
