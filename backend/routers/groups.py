@@ -84,7 +84,7 @@ def _sync_pinecone_group_metadata(
     """
     # Get chunks for this doc to determine modalities
     chunks_resp = supabase.table("app_chunks") \
-        .select("chunk_id, modality") \
+        .select("chunk_id, modality, storage_path") \
         .eq("doc_id", doc_id) \
         .eq("user_id", user_id) \
         .execute()
@@ -93,7 +93,6 @@ def _sync_pinecone_group_metadata(
         return
 
     chunk_ids = [c["chunk_id"] for c in chunks]
-    mod_map: Dict[str, str] = {c["chunk_id"]: c["modality"] for c in chunks}
 
     regs_resp = supabase.table("app_vector_registry") \
         .select("vector_id, chunk_id") \
@@ -103,9 +102,26 @@ def _sync_pinecone_group_metadata(
         return
 
     # Group vector IDs by modality to hit the right Pinecone index
+    # Need to distinguish between regular images and extracted images
+    chunks_with_paths = {c["chunk_id"]: c for c in chunks}
+
     by_mod: Dict[str, List[str]] = {}
     for r in regs:
-        m = mod_map.get(r["chunk_id"], "text")
+        chunk = chunks_with_paths.get(r["chunk_id"])
+        if not chunk:
+            continue
+
+        m = chunk["modality"]
+
+        # Extracted images (from PDFs/DOCX) use "extracted_image" index
+        # Pattern: user_id/doc_id/filename (has 3 path segments)
+        if m == "image":
+            storage_path = chunk.get("storage_path", "")
+            # Check if it's an extracted image (has pattern user_id/doc_id/filename)
+            path_parts = storage_path.split("/")
+            if len(path_parts) == 3:  # user_id/doc_id/filename
+                m = "extracted_image"
+
         by_mod.setdefault(m, []).append(r["vector_id"])
 
     from data_upload.pinecone_services import update_vectors_metadata
