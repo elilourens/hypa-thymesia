@@ -11,7 +11,7 @@
           size="lg"
           class="font-bold text-lg"
         >
-          Hypa-Thymesia
+          SmartQuery
         </UButton>
       </div>
 

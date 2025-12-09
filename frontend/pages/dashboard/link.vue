@@ -382,7 +382,7 @@ async function handleImportFiles() {
     if (successful > 0) {
       toast.add({
         title: `${successful} file${successful !== 1 ? 's' : ''} imported`,
-        description: `Successfully added to Hypa-Thymesia`,
+        description: `Successfully added to SmartQuery`,
         color: 'success',
         icon: 'i-lucide-check'
       })
@@ -567,7 +567,7 @@ function getRowId(row: GoogleDriveFile) {
             icon="i-lucide-download"
           >
             <span v-if="!importProgress">
-              Import to Hypa-Thymesia
+              Import to SmartQuery
             </span>
             <span v-else>
               Importing ({{ importProgress.current }}/{{ importProgress.total }})

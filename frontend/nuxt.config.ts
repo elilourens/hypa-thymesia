@@ -2,6 +2,11 @@
 export default defineNuxtConfig({
   modules: ['@nuxtjs/supabase', '@nuxt/ui',],
   css: ['~/assets/css/main.css'],
+
+  nitro: {
+    preset: 'cloudflare-pages'
+  },
+
   supabase: {
     redirectOptions: {
       login: '/login',

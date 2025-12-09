@@ -1,7 +1,7 @@
-# Hypa-Thymesia Project Context
+# SmartQuery Project Context
 
 ## Overview
-Hypa-Thymesia is a production-ready multimodal RAG (Retrieval-Augmented Generation) system for knowledge management and retrieval. Users upload documents and images (or import from Google Drive), which are processed, embedded, and stored for semantic search and AI-powered chat interactions. The system features automatic image tagging using CLIP and OWL-ViT models. The name references "hyperthymesia" - exceptional autobiographical memory.
+SmartQuery is a production-ready multimodal RAG (Retrieval-Augmented Generation) system for knowledge management and retrieval. Users upload documents and images (or import from Google Drive), which are processed, embedded, and stored for semantic search and AI-powered chat interactions. The system features automatic image tagging using CLIP and OWL-ViT models.
 
 ## Tech Stack
 

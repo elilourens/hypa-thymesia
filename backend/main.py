@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import all_routers  # keep your current imports
 
-app = FastAPI(title="Hypa-Thymesia API")
+app = FastAPI(title="SmartQuery API")
 
 # Allow your Nuxt dev origins (adjust if you use a different port/host)
 ALLOWED_ORIGINS = [

@@ -1,4 +1,4 @@
-# hypa-thymesia
+# SmartQuery
 
 To run backend: cd to backend folder: poetry run uvicorn main:app --reload --port 8000
 
