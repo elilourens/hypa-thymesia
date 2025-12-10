@@ -9,5 +9,6 @@ from .storage import router as storage_router
 from .gdrive import router as gdrive_router
 from .addFromGoogleDrive import router as add_from_gdrive_router
 from .tagging import router as tagging_router
+from .user_settings import router as user_settings_router
 
-all_routers = [health_router, upload_router, delete_router, query_router, files_router, groups_router, chat_router, storage_router, gdrive_router, add_from_gdrive_router, tagging_router]
+all_routers = [health_router, upload_router, delete_router, query_router, files_router, groups_router, chat_router, storage_router, gdrive_router, add_from_gdrive_router, tagging_router, user_settings_router]

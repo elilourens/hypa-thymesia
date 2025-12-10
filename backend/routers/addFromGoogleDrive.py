@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from core.config import get_settings
 from core.deps import get_supabase
 from core.security import get_current_user, AuthUser
+from core.user_limits import check_user_can_upload, ensure_user_settings_exist
 from ingestion.ingest_common import ingest_file_content
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,13 @@ async def ingest_google_drive_file(
     For documents: Upload to Supabase, extract text, embed to Pinecone
     """
     user_id = auth.id
+
+    # Ensure user settings exist
+    ensure_user_settings_exist(supabase, user_id)
+
+    # Check if user can upload (raises HTTPException if limit reached)
+    check_user_can_upload(supabase, user_id)
+
     logger.info(f"Importing from Google Drive: {request.filename}")
 
     # --- Get valid access token ---

@@ -274,7 +274,7 @@ async function handleFetchFiles() {
     if (!session?.access_token) throw new Error('No session')
 
     await fetchGoogleDriveFiles(session.access_token)
-    
+
     // files.value is now a computed that returns mutable array
     if (filenameQuery.value) {
       data.value = files.value.filter(f =>
@@ -283,13 +283,6 @@ async function handleFetchFiles() {
     } else {
       data.value = files.value
     }
-
-    toast.add({
-      title: 'Files loaded',
-      description: `Found ${files.value.length} files`,
-      color: 'success',
-      icon: 'i-lucide-check'
-    })
   } catch (err) {
     toast.add({
       title: 'Failed to load files',
@@ -303,7 +296,7 @@ async function handleFetchFiles() {
 /** ---------- Import handler ---------- **/
 async function handleImportFiles() {
   const selectedFiles = getSelectedFiles()
-  
+
   if (selectedFiles.length === 0) {
     toast.add({
       title: 'No files selected',
@@ -417,9 +410,9 @@ async function handleImportFiles() {
 /** ---------- Watch for search input ---------- **/
 watch([filenameQuery], () => {
   pagination.pageIndex = 0
-  
+
   if (!files.value.length) return
-  
+
   if (filenameQuery.value) {
     data.value = files.value.filter(f =>
       f.name.toLowerCase().includes(filenameQuery.value.toLowerCase())
@@ -471,166 +464,164 @@ onMounted(async () => {
   }
 })
 
-function getRowId(row: GoogleDriveFile) { 
-  return row.id 
+function getRowId(row: GoogleDriveFile) {
+  return row.id
 }
 </script>
 
 <template>
-  <BodyCard>
-    <div class="space-y-4">
-      <!-- Header -->
-      <div class="flex items-center justify-between">
-        <h1 class="font-semibold text-lg">Google Drive Files</h1>
-        <div v-if="!googleLinked && isInitialized" class="text-sm text-muted">
-          Link your Google account to browse files
-        </div>
-      </div>
-
-      <!-- Link/Unlink Section -->
-      <div class="border-b pb-4">
-        <div v-if="!googleLinked" class="space-y-2">
-          <p class="text-sm text-gray-600">
-            Connect your Google account to access your Drive files
-          </p>
-          <UButton
-            @click="handleLinkGoogle"
-            :loading="linking"
-            icon="i-lucide-chrome"
-          >
-            Link Google Account
-          </UButton>
-        </div>
-
-        <div v-else class="space-y-2">
-          <div class="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
-            <div class="flex items-center gap-2">
-              <UIcon name="i-lucide-check-circle" class="text-green-600" />
-              <span class="text-sm font-medium text-green-700">
-                Google account linked
-              </span>
-            </div>
-          </div>
-
-          <div class="flex gap-2 flex-wrap">
-            <UButton
-              @click="handleFetchFiles"
-              :loading="googleLoading"
-              variant="soft"
-              icon="i-lucide-refresh-ccw"
-            >
-              Refresh Files
-            </UButton>
-
-            <UButton
-              @click="handleUnlinkGoogle"
-              :loading="unlinking"
-              :disabled="googleLoading"
-              variant="outline"
-              icon="i-lucide-unlink"
-              color="red"
-            >
-              Unlink Google Account
-            </UButton>
-          </div>
-        </div>
-      </div>
-
-      <!-- Files Section -->
-      <div v-if="googleLinked" class="space-y-4">
-        <!-- Search and Import Bar -->
-        <div class="flex items-center gap-2">
-          <UInput
-            v-model="filenameQuery"
-            placeholder="Search filename…"
-            icon="i-lucide-magnifying-glass"
-            class="flex-1"
-          />
-          <div class="text-sm text-muted whitespace-nowrap">
-            <span v-if="!googleLoading">
-              Total: {{ files.length.toLocaleString() }}
-            </span>
-            <span v-else>Loading…</span>
-          </div>
-        </div>
-
-        <!-- Action Bar -->
-        <div class="flex items-center justify-between gap-2">
-          <div class="text-sm text-muted">
-            {{ selectedRowIds().length }} selected
-          </div>
-          <UButton
-            @click="handleImportFiles"
-            :loading="importing"
-            :disabled="selectedRowIds().length === 0 || googleLoading"
-            color="primary"
-            icon="i-lucide-download"
-          >
-            <span v-if="!importProgress">
-              Import to SmartQuery
-            </span>
-            <span v-else>
-              Importing ({{ importProgress.current }}/{{ importProgress.total }})
-            </span>
-          </UButton>
-        </div>
-
-        <!-- Files Table -->
-        <UTable
-          ref="table"
-          :data="data.slice(
-            pagination.pageIndex * pagination.pageSize,
-            (pagination.pageIndex + 1) * pagination.pageSize
-          )"
-          :columns="columns"
-          :loading="googleLoading"
-          sticky
-          empty="No files found."
-          :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
-          :sorting="sorting"
-          :getRowId="getRowId"
-          class="flex-1"
-        >
-          <template #loading>
-            <div class="py-6 text-sm">Fetching files…</div>
-          </template>
-          <template #empty>
-            <div class="py-6 text-sm">Nothing to show.</div>
-          </template>
-        </UTable>
-
-        <!-- Pagination -->
-        <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
-          <div>
-            Page {{ pagination.pageIndex + 1 }} •
-            Showing {{ data.slice(pagination.pageIndex * pagination.pageSize, (pagination.pageIndex + 1) * pagination.pageSize).length }} / {{ data.length }}
-          </div>
-          <UPagination
-            :default-page="pagination.pageIndex + 1"
-            :items-per-page="pagination.pageSize"
-            :total="data.length"
-            @update:page="(p: number) => (pagination.pageIndex = p - 1)"
-          />
-        </div>
-
-        <!-- Alerts -->
-        <UAlert
-          v-if="error"
-          icon="i-lucide-alert-circle"
-          color="error"
-          :title="error"
-          variant="subtle"
-          class="mt-4"
-        />
-        <UAlert
-          v-if="success"
-          icon="i-lucide-check-circle"
-          color="success"
-          :title="success"
-          variant="subtle"
-          class="mt-4"
-        />
+  <div class="space-y-4">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+      <h2 class="font-semibold text-lg">Google Drive Import</h2>
+      <div v-if="!googleLinked && isInitialized" class="text-sm text-muted">
+        Link your Google account to browse files
       </div>
     </div>
-  </BodyCard>
+
+    <!-- Link/Unlink Section -->
+    <div class="border-b pb-4">
+      <div v-if="!googleLinked" class="space-y-2">
+        <p class="text-sm text-gray-600">
+          Connect your Google account to access your Drive files
+        </p>
+        <UButton
+          @click="handleLinkGoogle"
+          :loading="linking"
+          icon="i-lucide-chrome"
+        >
+          Link Google Account
+        </UButton>
+      </div>
+
+      <div v-else class="space-y-2">
+        <div class="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
+          <div class="flex items-center gap-2">
+            <UIcon name="i-lucide-check-circle" class="text-green-600" />
+            <span class="text-sm font-medium text-green-700">
+              Google account linked
+            </span>
+          </div>
+        </div>
+
+        <div class="flex gap-2 flex-wrap">
+          <UButton
+            @click="handleFetchFiles"
+            :loading="googleLoading"
+            variant="soft"
+            icon="i-lucide-refresh-ccw"
+          >
+            Refresh Files
+          </UButton>
+
+          <UButton
+            @click="handleUnlinkGoogle"
+            :loading="unlinking"
+            :disabled="googleLoading"
+            variant="outline"
+            icon="i-lucide-unlink"
+            color="red"
+          >
+            Unlink Google Account
+          </UButton>
+        </div>
+      </div>
+    </div>
+
+    <!-- Files Section -->
+    <div v-if="googleLinked" class="space-y-4">
+      <!-- Search and Import Bar -->
+      <div class="flex items-center gap-2">
+        <UInput
+          v-model="filenameQuery"
+          placeholder="Search filename…"
+          icon="i-lucide-magnifying-glass"
+          class="flex-1"
+        />
+        <div class="text-sm text-muted whitespace-nowrap">
+          <span v-if="!googleLoading">
+            Total: {{ files.length.toLocaleString() }}
+          </span>
+          <span v-else>Loading…</span>
+        </div>
+      </div>
+
+      <!-- Action Bar -->
+      <div class="flex items-center justify-between gap-2">
+        <div class="text-sm text-muted">
+          {{ selectedRowIds().length }} selected
+        </div>
+        <UButton
+          @click="handleImportFiles"
+          :loading="importing"
+          :disabled="selectedRowIds().length === 0 || googleLoading"
+          color="primary"
+          icon="i-lucide-download"
+        >
+          <span v-if="!importProgress">
+            Import to SmartQuery
+          </span>
+          <span v-else>
+            Importing ({{ importProgress.current }}/{{ importProgress.total }})
+          </span>
+        </UButton>
+      </div>
+
+      <!-- Files Table -->
+      <UTable
+        ref="table"
+        :data="data.slice(
+          pagination.pageIndex * pagination.pageSize,
+          (pagination.pageIndex + 1) * pagination.pageSize
+        )"
+        :columns="columns"
+        :loading="googleLoading"
+        sticky
+        empty="No files found."
+        :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
+        :sorting="sorting"
+        :getRowId="getRowId"
+        class="flex-1"
+      >
+        <template #loading>
+          <div class="py-6 text-sm">Fetching files…</div>
+        </template>
+        <template #empty>
+          <div class="py-6 text-sm">Nothing to show.</div>
+        </template>
+      </UTable>
+
+      <!-- Pagination -->
+      <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
+        <div>
+          Page {{ pagination.pageIndex + 1 }} •
+          Showing {{ data.slice(pagination.pageIndex * pagination.pageSize, (pagination.pageIndex + 1) * pagination.pageSize).length }} / {{ data.length }}
+        </div>
+        <UPagination
+          :default-page="pagination.pageIndex + 1"
+          :items-per-page="pagination.pageSize"
+          :total="data.length"
+          @update:page="(p: number) => (pagination.pageIndex = p - 1)"
+        />
+      </div>
+
+      <!-- Alerts -->
+      <UAlert
+        v-if="error"
+        icon="i-lucide-alert-circle"
+        color="error"
+        :title="error"
+        variant="subtle"
+        class="mt-4"
+      />
+      <UAlert
+        v-if="success"
+        icon="i-lucide-check-circle"
+        color="success"
+        :title="success"
+        variant="subtle"
+        class="mt-4"
+      />
+    </div>
+  </div>
 </template>

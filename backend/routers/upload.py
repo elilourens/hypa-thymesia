@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Form
 from core.config import get_settings
 from core.deps import get_supabase
 from core.security import get_current_user, AuthUser
+from core.user_limits import check_user_can_upload, ensure_user_settings_exist
 from data_upload.supabase_text_services import upload_text_to_bucket
 from data_upload.supabase_image_services import upload_image_to_bucket
 from ingestion.ingest_common import ingest_file_content
@@ -26,8 +27,15 @@ async def ingest_text_and_image_files(
     Ingest a file by uploading it to storage and extracting text/images.
     """
     user_id = auth.id
+
+    # Ensure user settings exist
+    ensure_user_settings_exist(supabase, user_id)
+
+    # Check if user can upload (raises HTTPException if limit reached)
+    check_user_can_upload(supabase, user_id)
+
     content = await file.read()
-    
+
     logger.info(f"Upload started: {file.filename}, size: {len(content)} bytes, extract_deep_embeds: {extract_deep_embeds}")
 
     # --- Upload file to storage ---
