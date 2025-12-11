@@ -94,16 +94,7 @@ export const useGoogleDrive = () => {
       if (session && (session as any)?.provider_token) {
         const providerToken = (session as any).provider_token
 
-        // Check if the URL has a 'code' parameter (indicating OAuth redirect just happened)
-        const urlParams = new URLSearchParams(window.location.search)
-        const hasCodeParam = urlParams.has('code')
-
-        if (!hasCodeParam) {
-          console.log('[useGoogleDrive] No OAuth code in URL, skipping token save (not a fresh redirect)')
-          return false
-        }
-
-        // Additional check: Google tokens ALWAYS start with "ya29."
+        // Check token prefix: Google tokens ALWAYS start with "ya29."
         // Microsoft tokens start with "EwB" or "eyJ"
         if (!providerToken.startsWith('ya29.')) {
           console.log('[useGoogleDrive] Provider token does not appear to be a Google token (wrong prefix), skipping')

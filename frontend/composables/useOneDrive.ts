@@ -96,19 +96,10 @@ export const useOneDrive = () => {
 
         console.log('[useOneDrive] Provider token preview:', providerToken.substring(0, 10) + '...')
 
-        // Additional check: Microsoft tokens start with "EwB" or "eyJ"
+        // Check token prefix: Microsoft tokens start with "EwB" or "eyJ"
         // Google tokens start with "ya29."
         if (providerToken.startsWith('ya29.')) {
           console.log('[useOneDrive] Provider token appears to be a Google token (wrong prefix), skipping')
-          return false
-        }
-
-        // Check if the URL has a 'code' parameter (indicating OAuth redirect just happened)
-        const urlParams = new URLSearchParams(window.location.search)
-        const hasCodeParam = urlParams.has('code')
-
-        if (!hasCodeParam) {
-          console.log('[useOneDrive] No OAuth code in URL, skipping token save (not a fresh redirect)')
           return false
         }
 
