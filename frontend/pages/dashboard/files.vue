@@ -212,7 +212,7 @@ const columns: TableColumn<FileItem>[] = [
   },
   {
     accessorKey: 'storage_provider',
-    header: 'Storage',
+    header: 'Source',
     cell: ({ row }) => {
       const provider = row.original.storage_provider || 'supabase'
       const providerLabel = provider === 'google_drive' ? 'Google Drive' : provider === 'supabase' ? 'Supabase' : provider

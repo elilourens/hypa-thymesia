@@ -13,12 +13,12 @@ from core.user_limits import check_user_can_upload, ensure_user_settings_exist
 from ingestion.ingest_common import ingest_file_content
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["google_drive"])
+router = APIRouter(tags=["onedrive"])
 
 
-class IngestGoogleDriveFileRequest(BaseModel):
-    google_drive_id: str
-    google_drive_url: str
+class IngestOneDriveFileRequest(BaseModel):
+    onedrive_id: str
+    onedrive_url: str
     filename: str
     mime_type: str
     size_bytes: int
@@ -26,7 +26,7 @@ class IngestGoogleDriveFileRequest(BaseModel):
     extract_deep_embeds: bool = True
 
 
-def _get_stored_token(user_id: str, supabase, provider: str = "google"):
+def _get_stored_token(user_id: str, supabase, provider: str = "microsoft"):
     """Retrieve the most recent stored token for a user"""
     try:
         response = supabase.table("user_oauth_tokens").select("*").eq(
@@ -48,24 +48,26 @@ def _refresh_access_token(refresh_token: str, supabase, user_id: str):
     Updates the database with the new token.
     """
     try:
-        client_id = os.getenv("GOOGLE_CLIENT_ID")
-        client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+        client_id = os.getenv("MICROSOFT_CLIENT_ID")
+        client_secret = os.getenv("MICROSOFT_CLIENT_SECRET")
+        tenant_id = os.getenv("MICROSOFT_TENANT_ID", "common")
 
         if not client_id or not client_secret:
-            raise HTTPException(status_code=500, detail="Google credentials not configured")
+            raise HTTPException(status_code=500, detail="Microsoft credentials not configured")
 
-        token_url = "https://oauth2.googleapis.com/token"
+        token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
         payload = {
             "client_id": client_id,
             "client_secret": client_secret,
             "refresh_token": refresh_token,
-            "grant_type": "refresh_token"
+            "grant_type": "refresh_token",
+            "scope": "Files.Read.All Sites.Read.All offline_access"
         }
 
         response = requests.post(token_url, data=payload, timeout=10)
 
         if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to refresh Google token")
+            raise HTTPException(status_code=400, detail="Failed to refresh Microsoft token")
 
         token_data = response.json()
         new_access_token = token_data.get("access_token")
@@ -76,22 +78,22 @@ def _refresh_access_token(refresh_token: str, supabase, user_id: str):
         supabase.table("user_oauth_tokens").update({
             "access_token": new_access_token,
             "expires_at": expires_at
-        }).eq("user_id", user_id).eq("provider", "google").execute()
+        }).eq("user_id", user_id).eq("provider", "microsoft").execute()
 
         return new_access_token
     except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail="Failed to refresh token with Google")
+        raise HTTPException(status_code=500, detail="Failed to refresh token with Microsoft")
 
 
 def _get_valid_access_token(user_id: str, supabase) -> str:
     """
-    Get a valid Google access token, refreshing if necessary.
-    Returns the access token ready to use with Google APIs.
+    Get a valid Microsoft access token, refreshing if necessary.
+    Returns the access token ready to use with Microsoft Graph API.
     """
     token_record = _get_stored_token(user_id, supabase)
 
     if not token_record or not token_record.get("access_token"):
-        raise HTTPException(status_code=404, detail="No Google account linked")
+        raise HTTPException(status_code=404, detail="No Microsoft account linked")
 
     access_token = token_record.get("access_token")
     expires_at = token_record.get("expires_at")
@@ -126,27 +128,13 @@ def _get_valid_access_token(user_id: str, supabase) -> str:
     return access_token
 
 
-def download_google_drive_file(file_id: str, access_token: str, mime_type: str = None) -> bytes:
+def download_onedrive_file(file_id: str, access_token: str) -> bytes:
     """
-    Download a file from Google Drive using authenticated Google Drive API.
-    Uses the access token to download files from user's private Drive.
-    For Google Docs, Sheets, and Slides, exports as PDF.
+    Download a file from OneDrive using Microsoft Graph API.
     """
     try:
-        # Map Google Workspace MIME types to export formats
-        google_export_formats = {
-            'application/vnd.google-apps.document': 'application/pdf',
-            'application/vnd.google-apps.spreadsheet': 'application/pdf',
-            'application/vnd.google-apps.presentation': 'application/pdf'
-        }
-
-        # Check if this is a Google Workspace file that needs export
-        if mime_type and mime_type in google_export_formats:
-            export_mime = google_export_formats[mime_type]
-            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}/export?mimeType={export_mime}"
-        else:
-            # Use Google Drive API v3 to download file content
-            download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        # Use Microsoft Graph API to download file content
+        download_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{file_id}/content"
 
         headers = {
             'Authorization': f'Bearer {access_token}',
@@ -158,7 +146,7 @@ def download_google_drive_file(file_id: str, access_token: str, mime_type: str =
         # Handle common errors
         if response.status_code == 401:
             logger.error("Unauthorized - token may be invalid or expired")
-            raise HTTPException(status_code=401, detail="Google token invalid. Please relink your account.")
+            raise HTTPException(status_code=401, detail="Microsoft token invalid. Please relink your account.")
 
         if response.status_code == 403:
             logger.error("Forbidden - insufficient permissions")
@@ -166,7 +154,7 @@ def download_google_drive_file(file_id: str, access_token: str, mime_type: str =
 
         if response.status_code == 404:
             logger.error("File not found")
-            raise HTTPException(status_code=404, detail="File not found in Google Drive")
+            raise HTTPException(status_code=404, detail="File not found in OneDrive")
 
         response.raise_for_status()
 
@@ -180,12 +168,6 @@ def download_google_drive_file(file_id: str, access_token: str, mime_type: str =
         if len(content) == 0:
             raise Exception("Downloaded file is empty")
 
-        # For PDFs, validate the file header
-        if mime_type and mime_type in google_export_formats.values():
-            if not content.startswith(b'%PDF'):
-                logger.error(f"Invalid PDF format. First 20 bytes: {content[:20]}")
-                raise Exception("Downloaded file is not a valid PDF")
-
         return content
 
     except requests.exceptions.RequestException as e:
@@ -198,15 +180,15 @@ def download_google_drive_file(file_id: str, access_token: str, mime_type: str =
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
-@router.post("/ingest-google-drive-file")
-async def ingest_google_drive_file(
+@router.post("/ingest-onedrive-file")
+async def ingest_onedrive_file(
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
     settings = Depends(get_settings),
-    request: IngestGoogleDriveFileRequest = Body(...)
+    request: IngestOneDriveFileRequest = Body(...)
 ):
     """
-    Ingest a Google Drive file by downloading it and uploading to Supabase storage.
+    Ingest a OneDrive file by downloading it and uploading to Supabase storage.
     For images: Upload to Supabase + embed to Pinecone
     For documents: Upload to Supabase, extract text, embed to Pinecone
     """
@@ -218,7 +200,7 @@ async def ingest_google_drive_file(
     # Check if user can upload (raises HTTPException if limit reached)
     check_user_can_upload(supabase, user_id)
 
-    logger.info(f"Importing from Google Drive: {request.filename}")
+    logger.info(f"Importing from OneDrive: {request.filename}")
 
     # --- Get valid access token ---
     try:
@@ -227,14 +209,14 @@ async def ingest_google_drive_file(
         logger.error(f"Failed to get access token: {e.detail}")
         raise
 
-    # --- Download file from Google Drive ---
+    # --- Download file from OneDrive ---
     try:
-        content = download_google_drive_file(request.google_drive_id, access_token, request.mime_type)
+        content = download_onedrive_file(request.onedrive_id, access_token)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Download failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to download file from Google Drive: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to download file from OneDrive: {str(e)}")
 
     # --- Upload to Supabase storage ---
     from uuid import uuid4
@@ -253,24 +235,9 @@ async def ingest_google_drive_file(
         filename = filename.strip('_')
         return filename
 
-    # Handle Google Workspace files - they're exported as PDF
-    google_workspace_types = {
-        'application/vnd.google-apps.document': '.pdf',
-        'application/vnd.google-apps.spreadsheet': '.pdf',
-        'application/vnd.google-apps.presentation': '.pdf'
-    }
-
-    if request.mime_type in google_workspace_types:
-        # Google Workspace files are exported as PDF, update filename and mime_type
-        base_filename = request.filename.rsplit(".", 1)[0] if "." in request.filename else request.filename
-        base_filename = sanitize_filename(base_filename)
-        filename = f"{base_filename}.pdf"
-        mime_type = "application/pdf"
-        ext = "pdf"
-    else:
-        filename = sanitize_filename(request.filename)
-        mime_type = request.mime_type
-        ext = request.filename.rsplit(".", 1)[-1].lower() if "." in request.filename else ""
+    filename = sanitize_filename(request.filename)
+    mime_type = request.mime_type
+    ext = request.filename.rsplit(".", 1)[-1].lower() if "." in request.filename else ""
 
     # Determine bucket based on file type
     bucket = "images" if ext in ("png", "jpeg", "jpg", "webp") else "texts"
@@ -300,9 +267,9 @@ async def ingest_google_drive_file(
             extract_deep_embeds=request.extract_deep_embeds,
             group_id=request.group_id,
             storage_metadata={
-                "source": "google_drive",
-                "external_id": request.google_drive_id,
-                "external_url": request.google_drive_url,
+                "source": "onedrive",
+                "external_id": request.onedrive_id,
+                "external_url": request.onedrive_url,
                 "bucket": bucket,
             },
         )

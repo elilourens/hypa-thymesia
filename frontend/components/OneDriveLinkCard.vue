@@ -7,7 +7,7 @@ const UBadge = resolveComponent('UBadge')
 const UCheckbox = resolveComponent('UCheckbox')
 const UIcon = resolveComponent('UIcon')
 
-interface GoogleDriveFile {
+interface OneDriveFile {
   id: string
   name: string
   mimeType?: string
@@ -22,24 +22,24 @@ const table = useTemplateRef('table')
 const {
   error,
   success,
-  loading: googleLoading,
+  loading: oneDriveLoading,
   files,
-  googleLinked,
+  microsoftLinked,
   isInitialized,
-  checkGoogleLinked,
+  checkMicrosoftLinked,
   checkNeedsConsent,
-  linkGoogleAccount,
-  unlinkGoogle,
-  fetchGoogleDriveFiles,
-  ingestGoogleDriveFile,
+  linkMicrosoftAccount,
+  unlinkMicrosoft,
+  fetchOneDriveFiles,
+  ingestOneDriveFile,
   saveProviderTokensFromSession
-} = useGoogleDrive()
+} = useOneDrive()
 
 const client = useSupabaseClient()
 const toast = useToast()
 
 /** ---------- Table state ---------- **/
-const data = ref<GoogleDriveFile[]>([])
+const data = ref<OneDriveFile[]>([])
 const sorting = ref([{ id: 'createdTime', desc: true }])
 const pagination = reactive({ pageIndex: 0, pageSize: 20 })
 const filenameQuery = ref('')
@@ -57,7 +57,7 @@ function selectedRowIds(): string[] {
   return rows.map((r: any) => r.original.id as string)
 }
 
-function getSelectedFiles(): GoogleDriveFile[] {
+function getSelectedFiles(): OneDriveFile[] {
   const ids = selectedRowIds()
   return data.value.filter(f => ids.includes(f.id))
 }
@@ -66,9 +66,9 @@ function getSelectedFiles(): GoogleDriveFile[] {
 function prettyMime(mime?: string): string {
   if (!mime) return '—'
   if (mime.includes('pdf')) return 'PDF'
-  if (mime === 'application/vnd.google-apps.document') return 'Google Doc'
-  if (mime === 'application/vnd.google-apps.spreadsheet') return 'Google Sheet'
-  if (mime === 'application/vnd.google-apps.presentation') return 'Google Slides'
+  if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'Word Document'
+  if (mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return 'Excel Spreadsheet'
+  if (mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') return 'PowerPoint'
   if (mime.includes('document')) return 'Document'
   if (mime.includes('spreadsheet')) return 'Spreadsheet'
   if (mime.includes('presentation')) return 'Presentation'
@@ -76,7 +76,6 @@ function prettyMime(mime?: string): string {
   if (mime === 'image/jpeg' || mime === 'image/jpg') return 'JPEG Image'
   if (mime.startsWith('image/')) return 'Image'
   if (mime.startsWith('text/')) return 'Text'
-  if (mime === 'application/vnd.google-apps.folder') return 'Folder'
   return mime
 }
 
@@ -119,7 +118,7 @@ function sortHeader(label: string, columnId: string) {
 }
 
 /** ---------- Table columns ---------- **/
-const columns: TableColumn<GoogleDriveFile>[] = [
+const columns: TableColumn<OneDriveFile>[] = [
   {
     id: 'select',
     header: ({ table }: any) =>
@@ -189,15 +188,19 @@ const columns: TableColumn<GoogleDriveFile>[] = [
 
 /** ---------- Event handlers ---------- **/
 
-async function handleLinkGoogle() {
+async function handleLinkMicrosoft() {
   linking.value = true
   try {
     const { data: { session } } = await client.auth.getSession()
     if (!session?.access_token) throw new Error('No session')
 
-    // First, try to unlink any existing Google identity
+    // Check if we need to force consent to get refresh token
+    const needsConsent = await checkNeedsConsent(session.access_token)
+    console.log('[Link] Needs consent for refresh token:', needsConsent)
+
+    // First, try to unlink any existing Azure identity
     try {
-      console.log('[Link] Checking for existing Google identity...')
+      console.log('[Link] Checking for existing Azure identity...')
       const identitiesResult = await client.auth.getUserIdentities()
 
       let identities: any[] = []
@@ -207,11 +210,11 @@ async function handleLinkGoogle() {
         identities = identitiesResult
       }
 
-      const googleIdentity = identities.find((id: any) => id.provider === 'google')
+      const azureIdentity = identities.find((id: any) => id.provider === 'azure')
 
-      if (googleIdentity) {
-        console.log('[Link] Found existing Google identity, unlinking first...')
-        await client.auth.unlinkIdentity(googleIdentity)
+      if (azureIdentity) {
+        console.log('[Link] Found existing Azure identity, unlinking first...')
+        await client.auth.unlinkIdentity(azureIdentity)
         console.log('[Link] Successfully unlinked existing identity')
         // Small delay to let Supabase process the unlink
         await new Promise(resolve => setTimeout(resolve, 500))
@@ -221,13 +224,13 @@ async function handleLinkGoogle() {
       // Continue anyway - maybe there was no existing identity
     }
 
-    // Now link the Google account (always forces consent to get refresh token)
-    await linkGoogleAccount(client, session.access_token)
+    // Now link the Microsoft account with consent if needed
+    await linkMicrosoftAccount(client, session.access_token, needsConsent)
   } catch (err) {
     console.error('[Link] Error:', err)
     toast.add({
       title: 'Link failed',
-      description: error.value || 'Failed to link Google account',
+      description: error.value || 'Failed to link Microsoft account',
       color: 'error',
       icon: 'i-lucide-alert-circle'
     })
@@ -236,26 +239,26 @@ async function handleLinkGoogle() {
   }
 }
 
-async function handleUnlinkGoogle() {
+async function handleUnlinkMicrosoft() {
   unlinking.value = true
   try {
     const { data: { session } } = await client.auth.getSession()
     if (!session?.access_token) throw new Error('No session')
 
-    await unlinkGoogle(client, session.access_token)
+    await unlinkMicrosoft(client, session.access_token)
     data.value = []
     filenameQuery.value = ''
 
     toast.add({
       title: 'Unlinked',
-      description: 'Your Google Drive connection has been removed',
+      description: 'Your OneDrive connection has been removed',
       color: 'success',
       icon: 'i-lucide-check'
     })
   } catch (err) {
     toast.add({
       title: 'Unlink failed',
-      description: error.value || 'Failed to unlink Google account',
+      description: error.value || 'Failed to unlink Microsoft account',
       color: 'error',
       icon: 'i-lucide-alert-circle'
     })
@@ -269,7 +272,7 @@ async function handleFetchFiles() {
     const { data: { session } } = await client.auth.getSession()
     if (!session?.access_token) throw new Error('No session')
 
-    await fetchGoogleDriveFiles(session.access_token)
+    await fetchOneDriveFiles(session.access_token)
 
     // files.value is now a computed that returns mutable array
     if (filenameQuery.value) {
@@ -328,10 +331,7 @@ async function handleImportFiles() {
           'text/markdown',
           'image/png',
           'image/jpeg',
-          'image/webp',
-          'application/vnd.google-apps.document',
-          'application/vnd.google-apps.spreadsheet',
-          'application/vnd.google-apps.presentation'
+          'image/webp'
         ]
 
         const isSupported = file.mimeType && (
@@ -346,11 +346,11 @@ async function handleImportFiles() {
         }
 
         // Call the ingest method from composable
-        await ingestGoogleDriveFile(
+        await ingestOneDriveFile(
           session.access_token,
           {
-            google_drive_id: file.id,
-            google_drive_url: `https://drive.google.com/file/d/${file.id}/view`,
+            onedrive_id: file.id,
+            onedrive_url: file.webViewLink || `https://onedrive.live.com/?cid=${file.id}`,
             filename: file.name,
             mime_type: file.mimeType || 'application/octet-stream',
             size_bytes: file.size || 0,
@@ -428,20 +428,20 @@ onMounted(async () => {
 
     if (tokensSaved) {
       toast.add({
-        title: 'Google account linked!',
-        description: 'Your Google Drive is now connected',
+        title: 'Microsoft account linked!',
+        description: 'Your OneDrive is now connected',
         color: 'success',
         icon: 'i-lucide-check'
       })
     }
 
     if (session?.access_token) {
-      // Check if Google is linked
-      await checkGoogleLinked(session.access_token)
+      // Check if Microsoft is linked
+      await checkMicrosoftLinked(session.access_token)
 
       // If linked, fetch files
-      if (googleLinked.value) {
-        await fetchGoogleDriveFiles(session.access_token)
+      if (microsoftLinked.value) {
+        await fetchOneDriveFiles(session.access_token)
         data.value = files.value
       }
     }
@@ -460,27 +460,27 @@ onMounted(async () => {
   }
 })
 
-function getRowId(row: GoogleDriveFile) {
+function getRowId(row: OneDriveFile) {
   return row.id
 }
 </script>
 
 <template>
-  <UAccordion :items="[{ label: 'Google Drive Import', slot: 'google-drive' }]" :default-open="googleLinked">
-    <template #google-drive>
+  <UAccordion :items="[{ label: 'OneDrive Import', slot: 'onedrive' }]" :default-open="microsoftLinked">
+    <template #onedrive>
       <div class="space-y-4 pt-4">
         <!-- Link/Unlink Section -->
         <div class="border-b pb-4">
-          <div v-if="!googleLinked" class="space-y-2">
+          <div v-if="!microsoftLinked" class="space-y-2">
             <p class="text-sm text-gray-600">
-              Connect your Google account to access your Drive files
+              Connect your Microsoft account to access your OneDrive files
             </p>
             <UButton
-              @click="handleLinkGoogle"
+              @click="handleLinkMicrosoft"
               :loading="linking"
-              icon="i-lucide-chrome"
+              icon="i-lucide-cloud"
             >
-              Link Google Account
+              Link Microsoft Account
             </UButton>
           </div>
 
@@ -489,7 +489,7 @@ function getRowId(row: GoogleDriveFile) {
               <div class="flex items-center gap-2">
                 <UIcon name="i-lucide-check-circle" class="text-green-600" />
                 <span class="text-sm font-medium text-green-700">
-                  Google account linked
+                  Microsoft account linked
                 </span>
               </div>
             </div>
@@ -497,7 +497,7 @@ function getRowId(row: GoogleDriveFile) {
             <div class="flex gap-2 flex-wrap">
               <UButton
                 @click="handleFetchFiles"
-                :loading="googleLoading"
+                :loading="oneDriveLoading"
                 variant="soft"
                 icon="i-lucide-refresh-ccw"
               >
@@ -505,21 +505,21 @@ function getRowId(row: GoogleDriveFile) {
               </UButton>
 
               <UButton
-                @click="handleUnlinkGoogle"
+                @click="handleUnlinkMicrosoft"
                 :loading="unlinking"
-                :disabled="googleLoading"
+                :disabled="oneDriveLoading"
                 variant="outline"
                 icon="i-lucide-unlink"
                 color="red"
               >
-                Unlink Google Account
+                Unlink Microsoft Account
               </UButton>
             </div>
           </div>
         </div>
 
         <!-- Files Section -->
-        <div v-if="googleLinked" class="space-y-4">
+        <div v-if="microsoftLinked" class="space-y-4">
           <!-- Search and Import Bar -->
           <div class="flex items-center gap-2">
             <UInput
@@ -529,7 +529,7 @@ function getRowId(row: GoogleDriveFile) {
               class="flex-1"
             />
             <div class="text-sm text-muted whitespace-nowrap">
-              <span v-if="!googleLoading">
+              <span v-if="!oneDriveLoading">
                 Total: {{ files.length.toLocaleString() }}
               </span>
               <span v-else>Loading…</span>
@@ -544,7 +544,7 @@ function getRowId(row: GoogleDriveFile) {
             <UButton
               @click="handleImportFiles"
               :loading="importing"
-              :disabled="selectedRowIds().length === 0 || googleLoading"
+              :disabled="selectedRowIds().length === 0 || oneDriveLoading"
               color="primary"
               icon="i-lucide-download"
             >
@@ -565,7 +565,7 @@ function getRowId(row: GoogleDriveFile) {
               (pagination.pageIndex + 1) * pagination.pageSize
             )"
             :columns="columns"
-            :loading="googleLoading"
+            :loading="oneDriveLoading"
             sticky
             empty="No files found."
             :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"

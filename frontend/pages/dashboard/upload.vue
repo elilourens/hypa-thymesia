@@ -6,6 +6,7 @@ import { useQuota } from '@/composables/useQuota'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
 import GoogleDriveLinkCard from '@/components/GoogleDriveLinkCard.vue'
+import OneDriveLinkCard from '@/components/OneDriveLinkCard.vue'
 
 const { uploadFile } = useIngest()
 const { createGroup } = useGroupsApi()
@@ -251,8 +252,13 @@ onMounted(() => {
   </BodyCard>
 
   <!-- Google Drive Import Section -->
-  <BodyCard class="mt-6">
+  <BodyCard class="">
     <GoogleDriveLinkCard />
+  </BodyCard>
+
+  <!-- OneDrive Import Section -->
+  <BodyCard class="">
+    <OneDriveLinkCard />
   </BodyCard>
 </template>
 

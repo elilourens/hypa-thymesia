@@ -1,6 +1,6 @@
 import { ref, readonly, computed } from 'vue'
 
-interface GoogleDriveFile {
+interface OneDriveFile {
   id: string
   name: string
   mimeType?: string
@@ -10,16 +10,16 @@ interface GoogleDriveFile {
   size?: number
 }
 
-export const useGoogleDrive = () => {
+export const useOneDrive = () => {
   // ========================================================================
   // State
   // ========================================================================
-  
+
   const error = ref<string>('')
   const success = ref<string>('')
   const loading = ref<boolean>(false)
-  const files = ref<GoogleDriveFile[]>([])
-  const googleLinked = ref<boolean>(false)
+  const files = ref<OneDriveFile[]>([])
+  const microsoftLinked = ref<boolean>(false)
   const hasCheckedLink = ref<boolean>(false)
 
   // ========================================================================
@@ -33,18 +33,18 @@ export const useGoogleDrive = () => {
   // ========================================================================
 
   /**
-   * Save Google tokens to backend after linking.
+   * Save Microsoft tokens to backend after linking.
    * Called when user completes OAuth flow.
    */
-  const saveGoogleToken = async (
+  const saveMicrosoftToken = async (
     supabaseAccessToken: string,
-    googleAccessToken: string,
+    microsoftAccessToken: string,
     refreshToken?: string,
     expiresAt?: string
   ): Promise<void> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/save-google-token',
+        'http://localhost:8000/api/v1/save-microsoft-token',
         {
           method: 'POST',
           headers: {
@@ -52,7 +52,7 @@ export const useGoogleDrive = () => {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            access_token: googleAccessToken,
+            access_token: microsoftAccessToken,
             refresh_token: refreshToken || undefined,
             expires_at: expiresAt
           })
@@ -64,8 +64,8 @@ export const useGoogleDrive = () => {
         throw new Error(errorData.detail || 'Failed to save token')
       }
 
-      googleLinked.value = true
-      success.value = 'Google account linked successfully!'
+      microsoftLinked.value = true
+      success.value = 'Microsoft account linked successfully!'
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to save token'
       throw err
@@ -75,7 +75,7 @@ export const useGoogleDrive = () => {
   /**
    * Check if we have provider tokens in session and save them.
    * Called on page mount after OAuth redirect.
-   * Only processes tokens if the Google provider was just linked.
+   * Only processes tokens if the Azure provider was just linked.
    */
   const saveProviderTokensFromSession = async (
     supabaseClient: any
@@ -83,34 +83,36 @@ export const useGoogleDrive = () => {
     try {
       const { data: { session } } = await supabaseClient.auth.getSession()
 
-      console.log('[useGoogleDrive] Checking session for provider tokens:', {
+      console.log('[useOneDrive] Checking session for provider tokens:', {
         hasSession: !!session,
         hasAccessToken: !!session?.access_token,
         hasProviderToken: !!(session as any)?.provider_token,
         hasRefreshToken: !!(session as any)?.provider_refresh_token
       })
 
-      // If we have provider tokens, check if they're for Google
+      // If we have provider tokens, check if they're for Azure (Microsoft)
       if (session && (session as any)?.provider_token) {
         const providerToken = (session as any).provider_token
+
+        console.log('[useOneDrive] Provider token preview:', providerToken.substring(0, 10) + '...')
+
+        // Additional check: Microsoft tokens start with "EwB" or "eyJ"
+        // Google tokens start with "ya29."
+        if (providerToken.startsWith('ya29.')) {
+          console.log('[useOneDrive] Provider token appears to be a Google token (wrong prefix), skipping')
+          return false
+        }
 
         // Check if the URL has a 'code' parameter (indicating OAuth redirect just happened)
         const urlParams = new URLSearchParams(window.location.search)
         const hasCodeParam = urlParams.has('code')
 
         if (!hasCodeParam) {
-          console.log('[useGoogleDrive] No OAuth code in URL, skipping token save (not a fresh redirect)')
+          console.log('[useOneDrive] No OAuth code in URL, skipping token save (not a fresh redirect)')
           return false
         }
 
-        // Additional check: Google tokens ALWAYS start with "ya29."
-        // Microsoft tokens start with "EwB" or "eyJ"
-        if (!providerToken.startsWith('ya29.')) {
-          console.log('[useGoogleDrive] Provider token does not appear to be a Google token (wrong prefix), skipping')
-          return false
-        }
-
-        // Get user identities to verify Google identity exists
+        // Get user identities to verify Azure identity exists
         const identitiesResult = await supabaseClient.auth.getUserIdentities()
         let identities: any[] = []
         if (identitiesResult?.data?.identities) {
@@ -121,26 +123,26 @@ export const useGoogleDrive = () => {
           identities = identitiesResult.identities
         }
 
-        // Only process if Google identity exists
-        const hasGoogleIdentity = identities.some((id: any) => id.provider === 'google')
+        // Only process if Azure identity exists (this is Microsoft/OneDrive)
+        const hasAzureIdentity = identities.some((id: any) => id.provider === 'azure')
 
-        if (!hasGoogleIdentity) {
-          console.log('[useGoogleDrive] Provider token is not for Google (no Google identity), skipping')
+        if (!hasAzureIdentity) {
+          console.log('[useOneDrive] Provider token is not for Azure (no Azure identity), skipping')
           return false
         }
 
-        console.log('[useGoogleDrive] Found valid Google provider tokens in session, saving...')
+        console.log('[useOneDrive] Found valid Azure provider tokens in session, saving...')
 
-        const googleTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+        const microsoftTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
 
-        await saveGoogleToken(
+        await saveMicrosoftToken(
           session.access_token!,
           (session as any).provider_token,
           (session as any).provider_refresh_token,
-          googleTokenExpiresAt
+          microsoftTokenExpiresAt
         )
 
-        console.log('[useGoogleDrive] Tokens saved successfully from session!')
+        console.log('[useOneDrive] Tokens saved successfully from session!')
 
         // Clear URL params after successful save to prevent other composables from trying to process the same tokens
         const url = new URL(window.location.href)
@@ -152,7 +154,7 @@ export const useGoogleDrive = () => {
 
       return false
     } catch (err) {
-      console.error('[useGoogleDrive] Error saving tokens from session:', err)
+      console.error('[useOneDrive] Error saving tokens from session:', err)
       error.value = 'Failed to save OAuth tokens'
       return false
     }
@@ -163,12 +165,13 @@ export const useGoogleDrive = () => {
   // ========================================================================
 
   /**
-   * Link a new Google account via OAuth.
+   * Link a new Microsoft account via OAuth.
    * Sets up listener for OAuth tokens and initiates Supabase link flow.
    */
-  const linkGoogleAccount = async (
+  const linkMicrosoftAccount = async (
     supabaseClient: any,
-    supabaseAccessToken: string
+    supabaseAccessToken: string,
+    forceConsent: boolean = false
   ): Promise<void> => {
     error.value = ''
     success.value = ''
@@ -189,21 +192,19 @@ export const useGoogleDrive = () => {
                 throw new Error('No session access token')
               }
 
-              // Calculate Google token expiration time (typically 1 hour = 3600 seconds)
-              // The session.expires_at is for Supabase session, not Google token
-              // Google tokens typically expire in 3600 seconds (1 hour)
-              const googleTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+              // Calculate Microsoft token expiration time (typically 1 hour = 3600 seconds)
+              const microsoftTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
 
               // Save tokens to backend
-              await saveGoogleToken(
+              await saveMicrosoftToken(
                 currentSession.access_token,
                 session.provider_token,
                 session.provider_refresh_token,
-                googleTokenExpiresAt
+                microsoftTokenExpiresAt
               )
 
-              success.value = 'Google account linked successfully!'
-              googleLinked.value = true
+              success.value = 'Microsoft account linked successfully!'
+              microsoftLinked.value = true
 
               // Clean up listener
               subscription?.unsubscribe()
@@ -218,22 +219,19 @@ export const useGoogleDrive = () => {
 
       subscription = data.subscription
 
-      // Build query params - always force consent to ensure refresh token
-      // Google only returns refresh tokens on first auth OR when prompt=consent is used
+      // Build query params
       const queryParams: any = {
         access_type: 'offline', // Always request refresh token
-        prompt: 'consent' // Force consent screen to ensure we get a refresh token
+        tenant: 'common', // Use common tenant for multi-tenant support
+        prompt: forceConsent ? 'consent' : 'select_account' // Show account picker unless forcing consent
       }
 
-      // Initiate the OAuth link with Supabase
+      // Initiate the OAuth link with Supabase (Azure provider)
       const { error: linkError } = await supabaseClient.auth.linkIdentity({
-        provider: 'google',
+        provider: 'azure',
         options: {
           redirectTo: `${window.location.origin}/dashboard/upload`,
-          scopes: [
-            'https://www.googleapis.com/auth/drive.readonly',
-            'https://www.googleapis.com/auth/drive.metadata.readonly'
-          ],
+          scopes: 'openid email profile User.Read Files.Read.All Sites.Read.All offline_access',
           queryParams
         }
       })
@@ -245,17 +243,16 @@ export const useGoogleDrive = () => {
       }
     } catch (err) {
       if (!(err instanceof Error) || !error.value) {
-        error.value = 'Failed to link Google account'
+        error.value = 'Failed to link Microsoft account'
       }
       throw err
     }
   }
 
   /**
-   * Unlink Google account from both Supabase Auth and backend storage.
-   * Revokes tokens with Google.
+   * Unlink Microsoft account from both Supabase Auth and backend storage.
    */
-  const unlinkGoogle = async (
+  const unlinkMicrosoft = async (
     supabaseClient: any,
     supabaseAccessToken: string
   ): Promise<void> => {
@@ -276,27 +273,25 @@ export const useGoogleDrive = () => {
         identities = identitiesResult.identities
       }
 
-      // Find the Google identity
-      const googleIdentity = identities.find(
-        (id: any) => id.provider === 'google'
+      // Find the Azure identity (Microsoft)
+      const azureIdentity = identities.find(
+        (id: any) => id.provider === 'azure'
       )
 
-      if (!googleIdentity) {
-        throw new Error('No Google identity found to unlink')
+      if (azureIdentity) {
+        // Unlink from Supabase Auth
+        const { error: unlinkError } = await supabaseClient.auth.unlinkIdentity(
+          azureIdentity
+        )
+
+        if (unlinkError) {
+          throw new Error(unlinkError.message)
+        }
       }
 
-      // Unlink from Supabase Auth
-      const { error: unlinkError } = await supabaseClient.auth.unlinkIdentity(
-        googleIdentity
-      )
-
-      if (unlinkError) {
-        throw new Error(unlinkError.message)
-      }
-
-      // Delete tokens from backend and revoke with Google
+      // Delete tokens from backend
       const response = await fetch(
-        'http://localhost:8000/api/v1/unlink-google',
+        'http://localhost:8000/api/v1/unlink-microsoft',
         {
           method: 'DELETE',
           headers: {
@@ -311,8 +306,8 @@ export const useGoogleDrive = () => {
         throw new Error(errorData.detail || 'Failed to unlink')
       }
 
-      googleLinked.value = false
-      success.value = 'Google account unlinked successfully'
+      microsoftLinked.value = false
+      success.value = 'Microsoft account unlinked successfully'
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       error.value = `Failed to unlink: ${message}`
@@ -325,15 +320,15 @@ export const useGoogleDrive = () => {
   // ========================================================================
 
   /**
-   * Check if user has Google account linked.
+   * Check if user has Microsoft account linked.
    * Run this on app mount to restore state.
    */
-  const checkGoogleLinked = async (
+  const checkMicrosoftLinked = async (
     supabaseAccessToken: string
   ): Promise<boolean> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/google-linked',
+        'http://localhost:8000/api/v1/microsoft-linked',
         {
           headers: {
             'Authorization': `Bearer ${supabaseAccessToken}`,
@@ -343,11 +338,11 @@ export const useGoogleDrive = () => {
       )
 
       const data = await response.json()
-      googleLinked.value = data.linked
+      microsoftLinked.value = data.linked
       hasCheckedLink.value = true
       return data.linked
     } catch (err) {
-      console.error('Error checking Google link:', err)
+      console.error('Error checking Microsoft link:', err)
       hasCheckedLink.value = true
       return false
     }
@@ -362,7 +357,7 @@ export const useGoogleDrive = () => {
   ): Promise<boolean> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/google-needs-consent',
+        'http://localhost:8000/api/v1/microsoft-needs-consent',
         {
           headers: {
             'Authorization': `Bearer ${supabaseAccessToken}`,
@@ -380,14 +375,14 @@ export const useGoogleDrive = () => {
   }
 
   /**
-   * Fetch files from Google Drive with pagination support.
+   * Fetch files from OneDrive with pagination support.
    * Backend automatically handles token refresh.
    */
-  const fetchGoogleDriveFiles = async (
+  const fetchOneDriveFiles = async (
     supabaseAccessToken: string,
     pageSize: number = 100,
-    pageToken?: string
-  ): Promise<{ files: GoogleDriveFile[], nextPageToken?: string }> => {
+    nextLink?: string
+  ): Promise<{ files: OneDriveFile[], nextLink?: string }> => {
     error.value = ''
     success.value = ''
     loading.value = true
@@ -397,12 +392,12 @@ export const useGoogleDrive = () => {
         page_size: pageSize.toString()
       })
 
-      if (pageToken) {
-        params.append('page_token', pageToken)
+      if (nextLink) {
+        params.append('next_link', nextLink)
       }
 
       const response = await fetch(
-        `http://localhost:8000/api/v1/google-drive-files?${params.toString()}`,
+        `http://localhost:8000/api/v1/onedrive-files?${params.toString()}`,
         {
           method: 'GET',
           headers: {
@@ -413,8 +408,8 @@ export const useGoogleDrive = () => {
       )
 
       if (response.status === 401) {
-        error.value = 'Google token expired or invalid. Please relink your account.'
-        googleLinked.value = false
+        error.value = 'Microsoft token expired or invalid. Please relink your account.'
+        microsoftLinked.value = false
         return { files: [] }
       }
 
@@ -425,17 +420,17 @@ export const useGoogleDrive = () => {
 
       const data = await response.json()
       const filesList = data.files || []
-      
+
       files.value = filesList
-      success.value = `Found ${filesList.length} files in your Google Drive`
-      
+      success.value = `Found ${filesList.length} files in your OneDrive`
+
       return {
         files: filesList,
-        nextPageToken: data.nextPageToken
+        nextLink: data.nextLink
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      error.value = `Failed to fetch Google Drive files: ${message}`
+      error.value = `Failed to fetch OneDrive files: ${message}`
       return { files: [] }
     } finally {
       loading.value = false
@@ -443,14 +438,14 @@ export const useGoogleDrive = () => {
   }
 
   /**
-   * Ingest a Google Drive file using the backend API.
+   * Ingest a OneDrive file using the backend API.
    * Downloads and processes the file.
    */
-  const ingestGoogleDriveFile = async (
+  const ingestOneDriveFile = async (
     supabaseAccessToken: string,
     fileData: {
-      google_drive_id: string
-      google_drive_url: string
+      onedrive_id: string
+      onedrive_url: string
       filename: string
       mime_type: string
       size_bytes: number
@@ -459,7 +454,7 @@ export const useGoogleDrive = () => {
   ): Promise<any> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/ingest-google-drive-file',
+        'http://localhost:8000/api/v1/ingest-onedrive-file',
         {
           method: 'POST',
           headers: {
@@ -478,7 +473,7 @@ export const useGoogleDrive = () => {
       return await response.json()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      throw new Error(`Failed to ingest Google Drive file: ${message}`)
+      throw new Error(`Failed to ingest OneDrive file: ${message}`)
     }
   }
 
@@ -492,19 +487,19 @@ export const useGoogleDrive = () => {
     success: computed(() => success.value),
     loading: computed(() => loading.value),
     files: computed(() => [...files.value]), // Spread to ensure mutability
-    googleLinked: computed(() => googleLinked.value),
+    microsoftLinked: computed(() => microsoftLinked.value),
 
     // Computed
     isInitialized: computed(() => hasCheckedLink.value),
 
     // Methods
-    checkGoogleLinked,
+    checkMicrosoftLinked,
     checkNeedsConsent,
-    linkGoogleAccount,
-    unlinkGoogle,
-    fetchGoogleDriveFiles,
-    saveGoogleToken,
-    ingestGoogleDriveFile,
+    linkMicrosoftAccount,
+    unlinkMicrosoft,
+    fetchOneDriveFiles,
+    saveMicrosoftToken,
+    ingestOneDriveFile,
     saveProviderTokensFromSession
   }
 }
