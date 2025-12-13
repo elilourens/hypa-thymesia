@@ -22,7 +22,7 @@ def upload_text_to_bucket(
     Upload a text/PDF/docx file to Supabase with correct MIME type.
     """
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in [".txt", ".md", ".rtf", ".pdf", ".docx"]:
+    if ext not in [".txt", ".md", ".rtf", ".pdf", ".docx", ".ppt", ".pptx"]:
         return None
 
     file_path = f"uploads/{uuid4()}_{filename}"

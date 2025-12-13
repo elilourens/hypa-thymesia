@@ -137,6 +137,19 @@ def ingest_deep_embed_images(
         
         # Build Pinecone metadata
         vector_id = f"{chunk_id}:{embedding_version}"
+
+        # Ensure parent_bucket is always provided with sensible default
+        # Infer bucket from parent_storage_path if not provided
+        effective_parent_bucket = parent_bucket
+        if not effective_parent_bucket and parent_storage_path:
+            if parent_storage_path.startswith('google-drive/'):
+                effective_parent_bucket = 'google-drive'
+            elif parent_storage_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                effective_parent_bucket = 'images'
+            else:
+                effective_parent_bucket = 'texts'
+            logger.debug(f"Inferred parent_bucket: {effective_parent_bucket} from path: {parent_storage_path}")
+
         metadata = {
             "user_id": user_id,
             "doc_id": doc_id,
@@ -152,7 +165,7 @@ def ingest_deep_embed_images(
             "embedding_version": embedding_version,
             "parent_filename": parent_filename,
             "parent_storage_path": parent_storage_path,
-            "parent_bucket": parent_bucket,
+            "parent_bucket": effective_parent_bucket,  # Always provide a value
             "dimensions": f"{img_data['width']}x{img_data['height']}",
             "upload_date": datetime.utcnow().date().isoformat(),
         }

@@ -20,17 +20,22 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Set up logging
 logger = logging.getLogger(__name__)
 
-SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md"}
+SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md", ".ppt", ".pptx"}
 
 
 def _pick_loader(file_path: str):
+    """Pick appropriate loader based on file extension."""
     ext = os.path.splitext(file_path)[1].lower()
+
     if ext == ".pdf":
         return ("pdf", PyMuPDFLoader(file_path))
     elif ext == ".docx":
         return ("docx", Docx2txtLoader(file_path))
     elif ext in {".txt", ".md"}:
         return ("text", TextLoader(file_path, encoding="utf-8", autodetect_encoding=True))
+    elif ext in {".ppt", ".pptx"}:
+        # PowerPoint should be converted to PDF in ingest_common.py before reaching here
+        raise ValueError(f"PowerPoint files should be converted to PDF before text extraction")
     else:
         raise ValueError(f"Unsupported file type: {ext}")
 
@@ -103,7 +108,7 @@ def extract_text_metadata(
     logger.info(f"File extension: {ext}")
     kind, loader = _pick_loader(file_path)
     logger.info(f"Using loader: {kind}")
-    
+
     docs = loader.load() or []
     logger.info(f"Loaded {len(docs)} document(s)")
 
@@ -176,49 +181,59 @@ def extract_images_from_pdf(
     """Extract images from PDF using PyMuPDF."""
     logger.info(f"Starting PDF image extraction from: {file_path}")
     logger.info(f"Filter important: {filter_important}")
-    
+
     doc = fitz.open(file_path)
     doc_name = _base_name_no_ext(file_path)
     ts = datetime.utcnow().isoformat()
-    
+
     logger.info(f"PDF has {len(doc)} pages")
-    
+
     images = []
     total_images_found = 0
     images_passed_filter = 0
-    
+    seen_xrefs = set()  # Track unique images by xref to avoid duplicates
+    duplicates_skipped = 0
+
     for page_num in range(len(doc)):
         page = doc[page_num]
         image_list = page.get_images(full=True)
-        
+
         logger.info(f"Page {page_num + 1}: Found {len(image_list)} image(s)")
-        
+
         for img_index, img_info in enumerate(image_list):
             total_images_found += 1
             xref = img_info[0]
-            
+
+            # Skip duplicate images (same xref = same image reused across slides)
+            if xref in seen_xrefs:
+                logger.debug(f"  Skipping duplicate image (xref={xref})")
+                duplicates_skipped += 1
+                continue
+
             try:
                 base_image = doc.extract_image(xref)
                 image_bytes = base_image["image"]
-                
+
                 pil_image = Image.open(io.BytesIO(image_bytes))
                 logger.debug(f"  Image {img_index}: {pil_image.width}x{pil_image.height}, format: {base_image['ext']}")
-                
+
                 # Check filter
                 passed_filter = True
                 if filter_important:
                     passed_filter = is_important_image(pil_image)
-                
+
                 if not passed_filter:
                     logger.debug(f"  Skipping image {img_index} (filtered out)")
                     continue
-                
+
+                # Mark this xref as seen
+                seen_xrefs.add(xref)
                 images_passed_filter += 1
-                
+
                 # Get image position on page
                 img_rects = page.get_image_rects(xref)
                 bbox = img_rects[0] if img_rects else None
-                
+
                 images.append({
                     "image_bytes": image_bytes,
                     "pil_image": pil_image,
@@ -232,20 +247,21 @@ def extract_images_from_pdf(
                     "format": base_image["ext"],
                     "bbox": bbox,
                 })
-                
+
                 logger.info(f"  ✅ Kept image {img_index}: {pil_image.width}x{pil_image.height}")
-                
+
             except Exception as e:
                 logger.error(f"  ❌ Error processing image {img_index} on page {page_num + 1}: {e}")
                 continue
-    
+
     doc.close()
-    
+
     logger.info(f"PDF extraction complete:")
     logger.info(f"  - Total images found: {total_images_found}")
+    logger.info(f"  - Duplicates skipped: {duplicates_skipped}")
     logger.info(f"  - Images passed filter: {images_passed_filter}")
-    logger.info(f"  - Images filtered out: {total_images_found - images_passed_filter}")
-    
+    logger.info(f"  - Images filtered out: {total_images_found - duplicates_skipped - images_passed_filter}")
+
     return images
 
 
@@ -329,7 +345,7 @@ def extract_text_and_images_metadata(
 ) -> Dict[str, Any]:
     """
     Extract both text chunks AND images from document.
-    
+
     Args:
         file_path: Path to document
         user_id: User ID
@@ -337,11 +353,12 @@ def extract_text_and_images_metadata(
         chunk_overlap: Character overlap between chunks
         extract_images: Whether to extract images
         filter_important: Whether to filter out small/decorative images (min 150x150)
-    
+
     Returns:
         {
           "text_chunks": [...],  # existing format
           "images": [...],       # new: extracted images
+          "converted_pdf_path": str  # only for PowerPoint files
         }
     """
     logger.info("="*60)
@@ -350,29 +367,33 @@ def extract_text_and_images_metadata(
     logger.info(f"  extract_images: {extract_images}")
     logger.info(f"  filter_important: {filter_important}")
     logger.info("="*60)
-    
-    # Get text chunks (existing logic)
+
+    ext = os.path.splitext(file_path)[1].lower()
+
+    # Get text chunks (PowerPoint is now converted to PDF in _pick_loader)
     result = extract_text_metadata(file_path, user_id, max_chunk_size, chunk_overlap)
-    
+
     # Extract images if requested
     if extract_images:
-        ext = os.path.splitext(file_path)[1].lower()
         logger.info(f"Extracting images for file type: {ext}")
-        
+
         if ext == ".pdf":
             images = extract_images_from_pdf(file_path, user_id, filter_important)
             result["images"] = images
         elif ext == ".docx":
             images = extract_images_from_docx(file_path, user_id, filter_important)
             result["images"] = images
+        elif ext in {".ppt", ".pptx"}:
+            # PowerPoint should be converted to PDF in ingest_common.py before reaching here
+            raise ValueError("PowerPoint files should be converted to PDF before image extraction")
         else:
             logger.info(f"No image extraction for file type: {ext}")
             result["images"] = []
     else:
         logger.info("Image extraction disabled")
         result["images"] = []
-    
+
     logger.info(f"Final result: {len(result.get('text_chunks', []))} text chunks, {len(result.get('images', []))} images")
     logger.info("="*60)
-    
+
     return result

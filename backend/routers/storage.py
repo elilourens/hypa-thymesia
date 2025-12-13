@@ -10,18 +10,26 @@ router = APIRouter(prefix="/storage", tags=["storage"])
 def get_signed_url(
     bucket: str = Query(...),
     path: str = Query(...),
+    download: bool = Query(False, description="If true, forces download; if false, displays inline"),
     auth: AuthUser = Depends(get_current_user),
     supabase=Depends(get_supabase),
 ):
     """
     Generate a signed URL for any object in Supabase storage.
     """
-    logger.info(f"Getting signed URL for: bucket={bucket}, path={path}")
+    logger.info(f"Getting signed URL for: bucket={bucket}, path={path}, download={download}")
 
     try:
         logger.info(f"Generating Supabase signed URL for bucket: {bucket}, path: {path}")
 
-        res = supabase.storage.from_(bucket).create_signed_url(path, expires_in=3600)
+        # Use download parameter to control Content-Disposition header
+        # download=False means the file should be displayed inline (for PDFs, images, etc.)
+        # download=True means the file should be downloaded
+        res = supabase.storage.from_(bucket).create_signed_url(
+            path,
+            expires_in=3600,
+            options={"download": download}
+        )
         signed_url = res.get("signedURL")
         if not signed_url:
             logger.error(f"Supabase did not return a signed URL for: {path}")

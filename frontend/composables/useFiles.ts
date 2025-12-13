@@ -97,8 +97,11 @@ export function useFilesApi() {
 
   /**
    * Get a signed URL for one file in Supabase storage.
+   * @param bucket - The storage bucket name
+   * @param path - The file path within the bucket
+   * @param download - If true, forces download; if false, displays inline (default: false)
    */
-  async function getSignedUrl(bucket: string, path: string): Promise<string> {
+  async function getSignedUrl(bucket: string, path: string, download: boolean = false): Promise<string> {
     const headers = await authHeaders()
 
     try {
@@ -107,7 +110,7 @@ export function useFilesApi() {
         {
           method: 'GET',
           headers,
-          params: { bucket, path }
+          params: { bucket, path, download }
         }
       )
 

@@ -134,9 +134,9 @@ onMounted(() => {
           multiple
           label="Drop your file here"
           layout="list"
-          description="PDF, DOCX, TXT, PNG, JPG"
+          description="PDF, DOCX, PPT, PPTX, TXT, PNG, JPG"
           class="w-96 min-h-48"
-          accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"
+          accept=".pdf,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg"
         />
       </div>
 

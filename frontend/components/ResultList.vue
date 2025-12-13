@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { watch } from 'vue'
 import { useFilesApi } from '~/composables/useFiles'
 const { getSignedUrl, getThumbnailUrl } = useFilesApi()
 const toast = useToast()
@@ -15,12 +15,17 @@ function getFileName(title?: string) {
 // Builds URLs for deep linking
 function buildDeepLink(baseUrl: string, r: any) {
   const mime = r.metadata?.mime_type || ''
+
+  // PDF deep linking (PowerPoint is stored as PDF, so this works for both)
   if (mime.includes('application/pdf') && r.metadata?.page_number) {
     return `${baseUrl}#page=${r.metadata.page_number}`
   }
+
+  // DOCX viewer
   if (mime.includes('officedocument.wordprocessingml.document')) {
     return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(baseUrl)}`
   }
+
   return baseUrl
 }
 
@@ -28,7 +33,18 @@ function buildDeepLink(baseUrl: string, r: any) {
 
 async function handleOpen(r: any) {
   try {
-    const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
+    // For PowerPoint files that have been converted to PDF, use the converted PDF for viewing
+    let bucket = r.metadata.bucket
+    let storagePath = r.metadata.storage_path
+
+    if (r.metadata.converted_pdf_path) {
+      // Use the converted PDF for viewing (better browser support)
+      bucket = 'texts' // Converted PDFs are stored in the texts bucket
+      storagePath = r.metadata.converted_pdf_path
+    }
+
+    // Pass download=false to display inline in browser
+    const url = await getSignedUrl(bucket, storagePath, false)
     if (!url) throw new Error('No URL returned')
     window.open(buildDeepLink(url, r), '_blank')
   } catch (err: any) {
@@ -42,7 +58,8 @@ async function handleOpen(r: any) {
 
 async function handleDownload(r: any) {
   try {
-    const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path)
+    // Pass download=true to force download instead of inline display
+    const url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path, true)
     if (!url) throw new Error('No URL returned')
     window.open(url, '_blank')
   } catch (err: any) {
@@ -56,33 +73,25 @@ async function handleDownload(r: any) {
 
 async function handleOpenParentDoc(r: any) {
   try {
-    // Get parent bucket and storage path
     let parentBucket = r.metadata.parent_bucket
     let parentPath = r.metadata.parent_storage_path
 
-    // Determine file extension from parent path
-    const isImage = parentPath?.match(/\.(png|jpeg|jpg|webp)$/i)
+    if (!parentBucket || !parentPath) {
+      throw new Error('Parent document information missing')
+    }
 
-    // Infer bucket if not provided
-    if (!parentBucket && parentPath) {
-      // Check if path starts with a known prefix
-      if (parentPath.startsWith('google-drive/')) {
-        parentBucket = 'google-drive'
-        // Keep the full path including google-drive/ prefix
-      } else {
-        // For paths like "uploads/file.pdf" stored in texts/images bucket
-        // Bucket depends on file type: images go to 'images', docs go to 'texts'
-        parentBucket = isImage ? 'images' : 'texts'
-        // Keep the full path including uploads/ prefix
-      }
+    // Check if parent document has a converted PDF (for PowerPoint files)
+    if (r.metadata.converted_pdf_path) {
+      parentBucket = 'texts'
+      parentPath = r.metadata.converted_pdf_path
     }
 
     // Create a temporary result object with parent document info
     const parentResult = {
       metadata: {
         bucket: parentBucket,
-        storage_path: parentPath, // Use the full storage path as-is
-        mime_type: r.metadata.parent_storage_path?.endsWith('.pdf')
+        storage_path: parentPath,
+        mime_type: r.metadata.converted_pdf_path || r.metadata.parent_storage_path?.endsWith('.pdf')
           ? 'application/pdf'
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         page_number: r.metadata.page_number
@@ -90,7 +99,8 @@ async function handleOpenParentDoc(r: any) {
     }
 
     // Reuse the existing handleOpen logic
-    const url = await getSignedUrl(parentResult.metadata.bucket, parentResult.metadata.storage_path)
+    // Pass download=false to display inline in browser
+    const url = await getSignedUrl(parentResult.metadata.bucket, parentResult.metadata.storage_path, false)
     if (!url) throw new Error('No URL returned')
     window.open(buildDeepLink(url, parentResult), '_blank')
   } catch (err: any) {
@@ -102,7 +112,7 @@ async function handleOpenParentDoc(r: any) {
   }
 }
 
-// ========== Auto Fetch Thumbnail URLs for Images ==========
+// ========== Auto Fetch Thumbnail URLs for Images and PDFs ==========
 
 // whenever results change, populate missing thumbnail URLs
 watch(
@@ -122,6 +132,21 @@ watch(
           if (url) r.metadata.signed_url = url
         } catch (err) {
           console.error('Failed to get thumbnail URL for', r.metadata.storage_path, err)
+        }
+      }
+
+      // For text results with PDFs (including converted PowerPoint), fetch signed URL for preview
+      if (modality === 'text' && (r.metadata?.mime_type || '').includes('application/pdf') && !r.metadata?.signed_url) {
+        try {
+          // Use converted PDF path if available (for PowerPoint files)
+          const bucket = r.metadata.converted_pdf_path ? 'texts' : r.metadata.bucket
+          const storagePath = r.metadata.converted_pdf_path || r.metadata.storage_path
+
+          // Pass download=false to display inline in iframe
+          const url = await getSignedUrl(bucket, storagePath, false)
+          if (url) r.metadata.signed_url = url
+        } catch (err) {
+          console.error('Failed to get signed URL for PDF', r.metadata.storage_path, err)
         }
       }
     }

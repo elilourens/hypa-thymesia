@@ -130,9 +130,14 @@ async def query_endpoint(
                 "parent_bucket": md.get("parent_bucket"),
                 "page_number": md.get("page_number"),
                 "public_url": md.get("public_url"),  # Direct image URL
+                "converted_pdf_path": md.get("converted_pdf_path"),  # For PowerPoint files
             }
         else:
-            md = md | {"bucket": bucket, "storage_path": storage_path}
+            md = md | {
+                "bucket": bucket,
+                "storage_path": storage_path,
+                "converted_pdf_path": md.get("converted_pdf_path"),  # For PowerPoint files
+            }
 
         # Add tags for image results
         if md.get("modality") == "image" and chunk_id:

@@ -21,7 +21,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_TEXT = ("docx", "pdf", "txt", "md")
+SUPPORTED_TEXT = ("docx", "pdf", "txt", "md", "ppt", "pptx")
 SUPPORTED_IMAGES = ("png", "jpeg", "jpg", "webp")
 
 
@@ -142,19 +142,82 @@ async def ingest_file_content(
     
     # --- Handle text/PDF/docx ---
     logger.info(f"Processing as document: {ext}")
+
+    # Convert PowerPoint to PDF first
+    pdf_storage_path = None
+    original_pptx_filename = None
+    if ext in ("ppt", "pptx"):
+        logger.info("Converting PowerPoint to PDF")
+        from ingestion.text.extract_pptx import convert_ppt_to_pdf
+        from data_upload.supabase_text_services import upload_text_to_bucket
+
+        original_pptx_filename = filename  # Save original filename for reference
+
+        # Track temp file paths for cleanup
+        tmp_ppt_path = None
+        tmp_pdf_path = None
+
+        try:
+            # Write original PowerPoint to temp file
+            with NamedTemporaryFile(prefix="ingest_ppt_", suffix=f".{ext}", delete=False) as tmp_ppt:
+                tmp_ppt.write(file_content)
+                tmp_ppt_path = tmp_ppt.name
+
+            # Convert to PDF
+            tmp_pdf_path = tmp_ppt_path.replace(f".{ext}", "_converted.pdf")
+            convert_ppt_to_pdf(tmp_ppt_path, tmp_pdf_path)
+
+            # Read the converted PDF
+            with open(tmp_pdf_path, 'rb') as pdf_file:
+                pdf_content = pdf_file.read()
+
+            # Upload converted PDF to Supabase storage for viewing
+            pdf_filename = os.path.splitext(filename)[0] + ".pdf"
+            pdf_storage_path = upload_text_to_bucket(
+                supabase,
+                file_content=pdf_content,
+                filename=pdf_filename,
+                mime_type="application/pdf"
+            )
+            logger.info(f"Uploaded converted PDF to storage: {pdf_storage_path}")
+
+            # Use the PDF content for text extraction
+            file_content = pdf_content
+
+            # Update extension and filename to PDF
+            ext = "pdf"
+            filename = pdf_filename
+            mime_type = "application/pdf"
+
+            logger.info(f"Converted PowerPoint to PDF: {filename}")
+        finally:
+            # Cleanup temporary PowerPoint and PDF files
+            if tmp_ppt_path and os.path.exists(tmp_ppt_path):
+                try:
+                    os.unlink(tmp_ppt_path)
+                    logger.debug(f"Cleaned up temp PowerPoint: {tmp_ppt_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp PowerPoint: {e}")
+            if tmp_pdf_path and os.path.exists(tmp_pdf_path):
+                try:
+                    os.unlink(tmp_pdf_path)
+                    logger.debug(f"Cleaned up temp PDF: {tmp_pdf_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp PDF: {e}")
+
     suffix = f".{ext}" if ext else ""
-    
+
     with NamedTemporaryFile(prefix="ingest_", suffix=suffix, delete=False) as tmp:
         tmp.write(file_content)
         tmp_path = tmp.name
-    
+
     logger.info(f"Created temp file: {tmp_path}")
     
     try:
         # Extract text and optionally images
         should_extract_images = extract_deep_embeds and ext in ("pdf", "docx")
         logger.info(f"Should extract images: {should_extract_images}")
-        
+
         if should_extract_images:
             logger.info("Extracting text and images")
             meta_out = extract_text_and_images_metadata(
@@ -169,12 +232,12 @@ async def ingest_file_content(
             logger.info("Extracting text only")
             meta_out = extract_text_metadata(tmp_path, user_id=user_id, max_chunk_size=800)
             meta_out["images"] = []
-        
+
         chunks: List[Dict[str, Any]] = meta_out.get("text_chunks", [])
         images_data: List[Dict[str, Any]] = meta_out.get("images", [])
-        
+
         logger.info(f"Extraction complete: {len(chunks)} text chunks, {len(images_data)} images")
-        
+
     finally:
         try:
             os.unlink(tmp_path)
@@ -200,6 +263,8 @@ async def ingest_file_content(
         "char_start": c.get("char_start"),
         "char_end": c.get("char_end"),
         "preview": (c.get("chunk_text") or "")[:180].replace("\n", " "),
+        "converted_pdf_path": pdf_storage_path,  # Add converted PDF path for PowerPoint files
+        "original_filename": original_pptx_filename,  # Add original filename
     } for c in chunks]
     
     logger.info("Ingesting text chunks to Pinecone")
@@ -227,13 +292,22 @@ async def ingest_file_content(
         logger.error(f"CRITICAL ERROR in ingest_text_chunks: {e}", exc_info=True)
         raise
     
-    # Update with storage metadata if provided
+    # Combine all metadata updates into a single database operation
+    metadata_updates = {}
     if storage_metadata:
+        metadata_updates.update(storage_metadata)
+    if pdf_storage_path:
+        metadata_updates.update({
+            "converted_pdf_path": pdf_storage_path,
+            "original_filename": original_pptx_filename
+        })
+
+    if metadata_updates:
         try:
-            supabase.table("app_chunks").update(storage_metadata).eq("doc_id", doc_id).execute()
-            logger.info(f"Updated chunks with storage metadata")
+            supabase.table("app_chunks").update(metadata_updates).eq("doc_id", doc_id).execute()
+            logger.info(f"Updated chunks with combined metadata: {list(metadata_updates.keys())}")
         except Exception as e:
-            logger.warning(f"Could not update storage metadata: {e}")
+            logger.warning(f"Could not update metadata: {e}")
     
     # --- Embed and ingest extracted images ---
     images_result = None
