@@ -151,25 +151,57 @@ def extract_text_metadata(
 
 # ==================== Image Extraction Functions ====================
 
+def has_color_diversity(image: Image.Image, min_unique_colors: int = 256) -> bool:
+    """
+    Check if image has enough color diversity.
+    Filters out solid colors, black images, and simple gradients.
+    """
+    if image.mode != 'RGB':
+        return True  # Only check RGB images
+
+    try:
+        # Get unique colors - if >10000 colors, returns None
+        colors = image.getcolors(maxcolors=10000)
+
+        if colors is None:
+            # >10000 colors = definitely diverse
+            return True
+
+        num_colors = len(colors)
+        if num_colors < min_unique_colors:
+            logger.debug(f"Image rejected: only {num_colors} unique colors (min: {min_unique_colors})")
+            return False
+
+        return True
+    except:
+        return True  # If check fails, allow through
+
+
 def is_important_image(
     image: Image.Image,
     min_width: int = 150,
     min_height: int = 150,
     max_aspect_ratio: float = 3.0,
+    check_color_diversity: bool = True,
 ) -> bool:
-    """Filter out icons, lines, decorative elements."""
+    """Filter out icons, lines, decorative elements, and solid color images."""
     width, height = image.size
-    
+
     if width < min_width or height < min_height:
         logger.debug(f"Image filtered: too small ({width}x{height})")
         return False
-    
+
     aspect_ratio = max(width, height) / min(width, height)
     if aspect_ratio > max_aspect_ratio:
         logger.debug(f"Image filtered: aspect ratio too extreme ({aspect_ratio:.2f})")
         return False
-    
-    logger.debug(f"Image passed filter: {width}x{height}, aspect ratio {aspect_ratio:.2f}")
+
+    # Filter out solid colors and gradients
+    if check_color_diversity and not has_color_diversity(image):
+        logger.debug(f"Image filtered: solid color/gradient")
+        return False
+
+    logger.debug(f"Image passed filter: {width}x{height}")
     return True
 
 
@@ -214,8 +246,41 @@ def extract_images_from_pdf(
                 base_image = doc.extract_image(xref)
                 image_bytes = base_image["image"]
 
-                pil_image = Image.open(io.BytesIO(image_bytes))
-                logger.debug(f"  Image {img_index}: {pil_image.width}x{pil_image.height}, format: {base_image['ext']}")
+                # Try to open the image with PIL
+                try:
+                    pil_image = Image.open(io.BytesIO(image_bytes))
+                    original_mode = pil_image.mode
+                    logger.debug(f"  Image {img_index}: {pil_image.width}x{pil_image.height}, mode: {original_mode}, format: {base_image['ext']}, colorspace: {base_image.get('colorspace', 'unknown')}")
+                except Exception as pil_error:
+                    logger.warning(f"  Could not open image with PIL: {pil_error}. Trying alternative extraction...")
+                    # If PIL can't open it, try extracting via pixmap rendering
+                    try:
+                        img_rects = page.get_image_rects(xref)
+                        if img_rects:
+                            bbox = img_rects[0]
+                            # Render the image area as a pixmap
+                            pix = page.get_pixmap(clip=bbox, matrix=fitz.Matrix(2, 2))  # 2x scale for better quality
+                            pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                            original_mode = pil_image.mode
+                            logger.debug(f"  Rendered image from pixmap: {pil_image.width}x{pil_image.height}")
+                        else:
+                            logger.error(f"  Could not find image rect for xref={xref}")
+                            continue
+                    except Exception as pixmap_error:
+                        logger.error(f"  Could not extract via pixmap either: {pixmap_error}")
+                        continue
+
+                # Convert image to RGB for consistent display and processing
+                # This handles CMYK, 1-bit, grayscale, and other color modes
+                if pil_image.mode not in ('RGB', 'RGBA'):
+                    logger.debug(f"  Converting image from {pil_image.mode} to RGB")
+                    pil_image = pil_image.convert('RGB')
+                elif pil_image.mode == 'RGBA':
+                    # Convert RGBA to RGB for consistency
+                    logger.debug(f"  Converting image from RGBA to RGB")
+                    rgb_image = Image.new('RGB', pil_image.size, (255, 255, 255))
+                    rgb_image.paste(pil_image, mask=pil_image.split()[3] if len(pil_image.split()) == 4 else None)
+                    pil_image = rgb_image
 
                 # Check filter
                 passed_filter = True
@@ -230,12 +295,17 @@ def extract_images_from_pdf(
                 seen_xrefs.add(xref)
                 images_passed_filter += 1
 
+                # Convert PIL image back to bytes in PNG format for consistent storage
+                output_buffer = io.BytesIO()
+                pil_image.save(output_buffer, format='PNG')
+                converted_image_bytes = output_buffer.getvalue()
+
                 # Get image position on page
                 img_rects = page.get_image_rects(xref)
                 bbox = img_rects[0] if img_rects else None
 
                 images.append({
-                    "image_bytes": image_bytes,
+                    "image_bytes": converted_image_bytes,  # Use converted bytes
                     "pil_image": pil_image,
                     "page_number": page_num + 1,  # 1-based
                     "image_index": img_index,
@@ -244,11 +314,11 @@ def extract_images_from_pdf(
                     "timestamp": ts,
                     "width": pil_image.width,
                     "height": pil_image.height,
-                    "format": base_image["ext"],
+                    "format": "png",  # Always save as PNG after conversion
                     "bbox": bbox,
                 })
 
-                logger.info(f"  ✅ Kept image {img_index}: {pil_image.width}x{pil_image.height}")
+                logger.info(f"  ✅ Kept image {img_index}: {pil_image.width}x{pil_image.height} (original mode: {original_mode})")
 
             except Exception as e:
                 logger.error(f"  ❌ Error processing image {img_index} on page {page_num + 1}: {e}")
@@ -292,22 +362,33 @@ def extract_images_from_docx(
             
             try:
                 pil_image = Image.open(io.BytesIO(image_bytes))
-                logger.debug(f"Image {image_index}: {pil_image.width}x{pil_image.height}")
-                
+                original_mode = pil_image.mode
+                logger.debug(f"Image {image_index}: {pil_image.width}x{pil_image.height}, mode: {original_mode}")
+
+                # Convert image to RGB for consistent display and processing
+                if pil_image.mode not in ('RGB', 'RGBA'):
+                    logger.debug(f"  Converting image from {pil_image.mode} to RGB")
+                    pil_image = pil_image.convert('RGB')
+
                 # Check filter
                 passed_filter = True
                 if filter_important:
                     passed_filter = is_important_image(pil_image)
-                
+
                 if not passed_filter:
                     logger.debug(f"  Skipping image {image_index} (filtered out)")
                     image_index += 1
                     continue
-                
+
                 images_passed_filter += 1
-                
+
+                # Convert PIL image back to bytes in PNG format for consistent storage
+                output_buffer = io.BytesIO()
+                pil_image.save(output_buffer, format='PNG')
+                converted_image_bytes = output_buffer.getvalue()
+
                 images.append({
-                    "image_bytes": image_bytes,
+                    "image_bytes": converted_image_bytes,  # Use converted bytes
                     "pil_image": pil_image,
                     "page_number": None,  # DOCX doesn't have reliable pages
                     "image_index": image_index,
@@ -316,11 +397,11 @@ def extract_images_from_docx(
                     "timestamp": ts,
                     "width": pil_image.width,
                     "height": pil_image.height,
-                    "format": rel.target_ref.split('.')[-1],
+                    "format": "png",  # Always save as PNG after conversion
                     "bbox": None,
                 })
-                
-                logger.info(f"  ✅ Kept image {image_index}: {pil_image.width}x{pil_image.height}")
+
+                logger.info(f"  ✅ Kept image {image_index}: {pil_image.width}x{pil_image.height} (original mode: {original_mode})")
                 image_index += 1
                 
             except Exception as e:
