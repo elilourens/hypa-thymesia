@@ -44,12 +44,11 @@ def upload_extracted_image_to_bucket(
             )
         except Exception as update_error:
             raise RuntimeError(f"Failed to upload image: {e}, update failed: {update_error}")
-    
-    public_url = supabase.storage.from_(EXTRACTED_IMAGES_BUCKET).get_public_url(storage_path)
-    
+
+    # No longer generate public_url - buckets are private
+    # Frontend should use /storage/signed-url endpoint with bucket + storage_path
     return {
         "storage_path": storage_path,
-        "public_url": public_url,
         "bucket": EXTRACTED_IMAGES_BUCKET,
     }
 
@@ -159,7 +158,7 @@ def ingest_deep_embed_images(
             "source": "extracted",
             "bucket": upload_result["bucket"],
             "storage_path": upload_result["storage_path"],
-            "public_url": upload_result["public_url"],
+            # No public_url - frontend should use /storage/signed-url endpoint
             "mime_type": f"image/{img_data.get('format', 'png')}",
             "embedding_model": embedding_model,
             "embedding_version": embedding_version,

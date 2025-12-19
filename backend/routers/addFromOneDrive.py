@@ -10,6 +10,7 @@ from core.config import get_settings
 from core.deps import get_supabase
 from core.security import get_current_user, AuthUser
 from core.user_limits import check_user_can_upload, ensure_user_settings_exist
+from core.token_encryption import encrypt_token, decrypt_token, is_token_encrypted
 from ingestion.ingest_common import ingest_file_content
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,10 @@ class IngestOneDriveFileRequest(BaseModel):
 
 
 def _get_stored_token(user_id: str, supabase, provider: str = "microsoft"):
-    """Retrieve the most recent stored token for a user"""
+    """
+    Retrieve the most recent stored token for a user.
+    Automatically decrypts tokens if they are encrypted.
+    """
     try:
         response = supabase.table("user_oauth_tokens").select("*").eq(
             "user_id", user_id
@@ -37,7 +41,30 @@ def _get_stored_token(user_id: str, supabase, provider: str = "microsoft"):
             "created_at", desc=True
         ).limit(1).execute()
 
-        return response.data[0] if response.data else None
+        if not response.data:
+            return None
+
+        token_record = response.data[0]
+
+        # Decrypt tokens if they exist and are encrypted
+        if token_record.get("access_token"):
+            try:
+                # Check if token is encrypted (for backwards compatibility during migration)
+                if is_token_encrypted(token_record["access_token"]):
+                    token_record["access_token"] = decrypt_token(token_record["access_token"])
+            except Exception as e:
+                logger.warning(f"Failed to decrypt access_token: {e}")
+                # Token might be plaintext during migration - continue
+
+        if token_record.get("refresh_token"):
+            try:
+                if is_token_encrypted(token_record["refresh_token"]):
+                    token_record["refresh_token"] = decrypt_token(token_record["refresh_token"])
+            except Exception as e:
+                logger.warning(f"Failed to decrypt refresh_token: {e}")
+                # Token might be plaintext during migration - continue
+
+        return token_record
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
@@ -74,9 +101,12 @@ def _refresh_access_token(refresh_token: str, supabase, user_id: str):
         expires_in = token_data.get("expires_in", 3600)
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
 
+        # Encrypt token before storing in database
+        encrypted_access_token = encrypt_token(new_access_token)
+
         # Update token in database
         supabase.table("user_oauth_tokens").update({
-            "access_token": new_access_token,
+            "access_token": encrypted_access_token,
             "expires_at": expires_at
         }).eq("user_id", user_id).eq("provider", "microsoft").execute()
 

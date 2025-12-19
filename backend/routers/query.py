@@ -129,7 +129,7 @@ async def query_endpoint(
                 "parent_storage_path": md.get("parent_storage_path"),
                 "parent_bucket": md.get("parent_bucket"),
                 "page_number": md.get("page_number"),
-                "public_url": md.get("public_url"),  # Direct image URL
+                # No public_url - frontend should use /storage/signed-url endpoint
                 "converted_pdf_path": md.get("converted_pdf_path"),  # For PowerPoint files
             }
         else:
