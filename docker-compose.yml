@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: hypa-thymesia-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Point to Ollama running on your host machine
+      # On Windows/Mac, use host.docker.internal
+      # On Linux, use 172.17.0.1 or host network mode
+      - OLLAMA_URL=http://host.docker.internal:11434
+    env_file:
+      - ./backend/.env
+    volumes:
+      # Mount data directory for persistent file storage
+      - ./backend/data:/app/data
+    restart: unless-stopped
+    networks:
+      - app-network
+    # GPU support - uncomment fro GPU acceleration
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    # On Linux, you might need this instead of host.docker.internal
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+
+networks:
+  app-network:
+    driver: bridge
