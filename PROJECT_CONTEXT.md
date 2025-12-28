@@ -1,7 +1,7 @@
-# SmartQuery Project Context
+# Hypa-Thymesia (SmartQuery) Project Context
 
 ## Overview
-SmartQuery is a production-ready multimodal RAG (Retrieval-Augmented Generation) system for knowledge management and retrieval. Users upload documents and images (or import from Google Drive), which are processed, embedded, and stored for semantic search and AI-powered chat interactions. The system features automatic image tagging using CLIP and OWL-ViT models.
+Hypa-Thymesia (SmartQuery) is a production-ready multimodal RAG (Retrieval-Augmented Generation) system for knowledge management and intelligent document retrieval. Users upload documents and images (or import from Google Drive/OneDrive), which are processed, embedded, and stored for semantic search and AI-powered chat interactions. The system features automatic image tagging using CLIP and OWL-ViT models, multi-modal search capabilities, and an intelligent RAG chat interface powered by LangGraph.
 
 ## Tech Stack
 
@@ -14,19 +14,20 @@ SmartQuery is a production-ready multimodal RAG (Retrieval-Augmented Generation)
 - **LLM**: Ollama 0.5.1 (Mistral model, local inference)
 - **Embeddings**:
   - Text: all-MiniLM-L12-v2 via sentence-transformers 2.7.0 (384D)
-  - Images: CLIP ViT-B-32 via open-clip-torch 3.0.0 (512D)
+  - Images: CLIP ViT-B-32 via sentence-transformers 3.0.0 (512D)
   - Cross-modal: CLIP text encoder (512D)
 - **Image Tagging**:
   - CLIP ViT-B-32 (candidate generation)
   - OWL-ViT via transformers 4.44.2 (zero-shot object detection)
-  - 650 curated object labels
+  - 650 curated object labels across 14 categories
 - **Document Processing**:
   - PyMuPDF (fitz) 1.26.3 (PDF)
   - python-docx 1.2.0 (DOCX)
+  - python-pptx (PowerPoint conversion)
   - Pillow 11.3.0 (images)
   - NLTK 3.9.1 (text processing)
 - **Search**: rank-bm25 0.2.2 for hybrid search
-- **OAuth**: Google Drive integration with token refresh
+- **OAuth**: Google Drive + OneDrive integration with token refresh
 - **Utilities**: python-jose 3.5.0, PyJWT 2.10.1, cryptography 45.0.6
 
 ### Frontend (Vue/Nuxt)
@@ -41,11 +42,11 @@ SmartQuery is a production-ready multimodal RAG (Retrieval-Augmented Generation)
 
 ### Data Flow
 ```
-Upload (Direct/GDrive) → Extract Text/Images → Chunk (800 chars, 20 overlap) → Embed → Store (Pinecone + Supabase)
+Upload (Direct/GDrive/OneDrive) → Extract Text/Images → Chunk (800 chars, 20 overlap) → Embed → Store (Pinecone + Supabase)
   ↓ (for uploaded images only)
   Auto-Tag (CLIP → OWL-ViT) → Store Tags
 
-Query → Embed → Pinecone Search (with filters) → BM25 Rerank → Highlight → Return Results
+Query → Embed → Pinecone Search (with filters) → BM25 Rerank (optional) → Highlight → Return Results
 
 Chat → LangGraph: list_groups → decide_params → retrieve → answer → Stream Response
 ```
@@ -53,8 +54,10 @@ Chat → LangGraph: list_groups → decide_params → retrieve → answer → St
 ### Directory Structure
 ```
 backend/
-├── main.py                         # FastAPI app entry point
-├── routers/                        # API endpoints
+├── main.py                         # FastAPI app entry point with CORS
+├── pyproject.toml                  # Poetry dependencies
+├── .env                            # Environment configuration
+├── routers/                        # API endpoints (13 routers)
 │   ├── upload.py                  # File ingestion (/api/v1/ingest/upload-text-and-images)
 │   ├── query.py                   # Semantic search (/api/v1/ingest/query)
 │   ├── chat.py                    # AI chat interface (/api/v1/chat)
@@ -62,14 +65,18 @@ backend/
 │   ├── files.py                   # File management (/api/v1/files)
 │   ├── gdrive.py                  # Google Drive OAuth (/api/v1/google-*)
 │   ├── addFromGoogleDrive.py      # GDrive file import (/api/v1/ingest-google-drive-file)
+│   ├── onedrive.py                # OneDrive OAuth support
+│   ├── addFromOneDrive.py         # OneDrive file import
 │   ├── storage.py                 # Storage operations (/api/v1/storage/signed-url)
 │   ├── delete.py                  # Deletion operations (/api/v1/ingest/delete-document)
 │   ├── tagging.py                 # Image tagging (/api/v1/tag-upload, /images/{id}/tags)
+│   ├── user_settings.py           # User settings management
 │   └── health.py                  # Health check (/api/v1/health)
 ├── ingestion/                     # Document processing
 │   ├── ingest_common.py           # Unified ingestion logic (handles all file types)
 │   └── text/
-│       └── extract_text.py        # Text extraction + chunking (PDF/DOCX/TXT)
+│       ├── extract_text.py        # Text extraction + chunking (PDF/DOCX/TXT)
+│       └── extract_pptx.py        # PowerPoint to PDF conversion
 ├── embed/                         # Embedding generation
 │   ├── text_embedder.py           # Text embeddings (all-MiniLM-L12-v2, 384D)
 │   ├── image_embedder.py          # Image embeddings (CLIP ViT-B-32, 512D)
@@ -79,7 +86,8 @@ backend/
 │   ├── tag_pipeline.py            # Two-stage CLIP + OWL-ViT pipeline
 │   ├── label_embedder.py          # CLIP candidate generation
 │   ├── owlvit_detector.py         # OWL-ViT verification
-│   └── background_tasks.py        # Async tagging tasks
+│   ├── background_tasks.py        # Async tagging tasks
+│   └── document_tagger.py         # Document-level tagging
 ├── rag/
 │   └── graph.py                   # LangGraph RAG pipeline (4 nodes)
 ├── data_upload/                   # Storage services
@@ -90,11 +98,16 @@ backend/
 ├── core/
 │   ├── security.py                # JWT authentication with JWKS
 │   ├── config.py                  # Pydantic settings (env vars)
-│   └── deps.py                    # Dependency injection
+│   ├── deps.py                    # Dependency injection
+│   ├── token_encryption.py        # OAuth token encryption/decryption
+│   └── user_limits.py             # Upload quota enforcement
+├── schemas/                       # Pydantic request/response models
 └── config/
     └── object_labels.json         # 650 curated labels (14 categories)
 
 frontend/
+├── nuxt.config.ts                 # Nuxt configuration
+├── package.json                   # npm dependencies
 ├── pages/
 │   ├── index.vue                  # Landing page (redirects)
 │   ├── login.vue                  # Supabase authentication
@@ -111,13 +124,17 @@ frontend/
 │   ├── Header.vue                 # Navigation header
 │   ├── BodyCard.vue               # Page layout wrapper
 │   ├── GroupSelect.vue            # Group dropdown (all/none/specific)
-│   └── ResultList.vue             # Search results display (text highlights, image tags)
+│   ├── ResultList.vue             # Search results display (text highlights, image tags)
+│   ├── GoogleDriveLinkCard.vue    # Google Drive OAuth UI
+│   └── OneDriveLinkCard.vue       # OneDrive OAuth UI
 ├── composables/
 │   ├── useIngest.ts               # Upload, query, delete operations
 │   ├── useFiles.ts                # File listing with filters
 │   ├── useGroups.ts               # Group CRUD
 │   ├── useGoogleDrive.ts          # OAuth + Drive file listing
-│   └── useChat.ts                 # Chat message handling
+│   ├── useOneDrive.ts             # OneDrive OAuth support
+│   ├── useChat.ts                 # Chat message handling
+│   └── useQuota.ts                # Quota management
 └── middleware/
     └── auth.global.ts             # Protects dashboard routes
 ```
@@ -125,26 +142,32 @@ frontend/
 ## Core Features
 
 ### 1. Document Ingestion
-- **Supported formats**: PDF, DOCX, TXT, MD, PNG, JPEG, JPG, WEBP
+- **Supported formats**: PDF, DOCX, TXT, MD, PPT, PPTX, PNG, JPEG, JPG, WEBP
+- **PowerPoint support**: Converts PPT/PPTX to PDF for processing
 - **Deep embedding**: Extracts images from PDFs/DOCX and embeds separately in dedicated index
 - **Chunking**: 800 character chunks with 20 character overlap
 - **Metadata**: Page numbers, character positions, text previews (180 chars)
-- **Google Drive**: OAuth-based import with auto token refresh (downloads to Supabase storage)
+- **Google Drive & OneDrive**: OAuth-based import with auto token refresh (downloads to Supabase storage)
 - **Auto-tagging**: ONLY for directly uploaded images (disabled for extracted images from documents)
   - Two-stage pipeline: CLIP candidate generation → OWL-ViT verification
   - 650 object labels across 14 categories
   - Stores bounding boxes and confidence scores
+- **Quota enforcement**: User upload limits configurable per user
 
 ### 2. Multi-Modal Search (3 Modes)
 - **Text Search** (`route: "text"`): Semantic text-to-text using all-MiniLM-L12-v2 (384D)
   - BM25 hybrid reranking (configurable weight)
   - Text highlighting with span matching
+  - Keyword search mode option
 - **Image Search** (`route: "image"`): Text-to-image search using CLIP (512D)
   - Searches uploaded images only
   - Returns auto-detected tags
 - **Extracted Image Search** (`route: "extracted_image"`): Text-to-image for document images
   - Searches images extracted from PDFs/DOCX
   - Returns parent document info
+- **Tag-Based Search**: Search images by detected tags
+  - Filter by minimum confidence
+  - Popular tags endpoint for autocomplete
 - **Filtering**: By group_id (Pinecone metadata filter)
 - **Configurable**: Top-K results (1-50), BM25 weight (0-1)
 
@@ -178,7 +201,7 @@ frontend/
 - **Storage**: app_image_tags table with chunk_id, tag_name, confidence, bbox
 - **Search**: Tag-based search endpoint (`/search/by-tags`)
 - **IMPORTANT**: Auto-tagging is ONLY enabled for directly uploaded images
-  - Disabled for images extracted from PDFs/DOCX (line 266 in ingest_common.py)
+  - Disabled for images extracted from PDFs/DOCX (performance optimization)
 
 ### 5. Organization
 - **Groups**: Create, rename, delete document collections
@@ -189,7 +212,7 @@ frontend/
 
 ### 6. Storage Architecture
 - **Supabase Storage**: 3 buckets
-  - `documents`: PDFs, DOCX, TXT, MD files
+  - `documents`: PDFs, DOCX, TXT, MD, PPT, PPTX files
   - `images`: Directly uploaded images
   - `extracted-images`: Images extracted from PDFs/DOCX
 - **Pinecone Indexes**: 3 separate indexes (avoids dimension conflicts)
@@ -203,15 +226,18 @@ frontend/
   - `app_vector_registry`: Maps vector_id to chunk_id (CASCADE DELETE)
   - `app_groups`: User-defined groups (group_id, user_id, name, sort_index)
   - `app_image_tags`: Auto-detected tags (chunk_id, tag_name, confidence, verified, bbox)
-  - `user_oauth_tokens`: Google OAuth tokens (provider, access_token, refresh_token, expires_at)
+  - `user_oauth_tokens`: Google/OneDrive OAuth tokens (provider, access_token, refresh_token, expires_at)
+  - `user_settings`: User quotas and preferences (max_files, current_count)
 - **Database Views**:
   - `app_docs_with_group`: Joins chunks with doc_meta for efficient file listing
 
 ### 7. Security
 - **Authentication**: Supabase JWT with JWKS validation
 - **User isolation**: All data namespaced by user_id (Pinecone namespace + DB filters)
-- **OAuth**: Secure Google token storage with automatic refresh (5-minute buffer)
+- **OAuth**: Secure Google/OneDrive token storage with automatic refresh (5-minute buffer)
+- **Token encryption**: OAuth tokens encrypted in database
 - **CORS**: Configured for Nuxt frontend in main.py
+- **Signed URLs**: 1-hour expiry for storage access
 
 ## Key Implementation Details
 
@@ -232,6 +258,7 @@ overlap = 20      # characters
 1. **text**: Search text chunks with text query (all-MiniLM embeddings)
    - BM25 hybrid reranking
    - Text highlighting with span matching
+   - Keyword search mode option
 2. **image**: Search uploaded images with text query (CLIP text→image)
    - Returns auto-detected tags
 3. **extracted_image**: Search document-extracted images with text query (CLIP)
@@ -267,6 +294,11 @@ Custom text span matching algorithm to highlight relevant portions in search res
 - **File listing**: Public folder only, non-recursive
 - **Download flow**: Multiple fallback methods for large files (handles virus scan confirmation)
 - **Storage**: Downloads to Supabase storage, then standard ingestion pipeline
+
+### OneDrive Integration
+- **OAuth 2.0 flow**: Similar to Google Drive implementation
+- **Token storage**: Encrypted in user_oauth_tokens table with provider field
+- **Token refresh**: Automatic refresh before API calls
 
 ### Auto-Tagging Configuration
 - **CLIP thresholds**: 0.15 min confidence (lowered for better recall)
@@ -326,6 +358,9 @@ Custom text span matching algorithm to highlight relevant portions in search res
 - `GET /tags/popular`: Get most frequent tags
   - Parameters: limit, verified_only
 
+### User Settings
+- User quota and preference management endpoints
+
 ### Health
 - `GET /health`: Health check endpoint
 
@@ -348,6 +383,10 @@ PINECONE_EXTRACTED_IMAGE_INDEX_NAME=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
+# OneDrive OAuth (optional)
+ONEDRIVE_CLIENT_ID=
+ONEDRIVE_CLIENT_SECRET=
+
 # Ollama
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=mistral
@@ -368,6 +407,9 @@ DOC_PREVIEW_CHARS=50000
 
 # Pinecone Settings
 PINECONE_MAX_BATCH=100
+
+# User Limits
+USER_UPLOAD_LIMIT=1000
 ```
 
 ### Frontend (.env)
@@ -427,14 +469,14 @@ Managed via Supabase MCP server tools (available in Claude Code)
    - **NO auto-tagging for extracted images**
 7. Return doc_id and ingestion stats
 
-### File Upload Flow (Google Drive)
-1. User links Google account via OAuth (frontend handles redirect)
+### File Upload Flow (Google Drive/OneDrive)
+1. User links account via OAuth (frontend handles redirect)
 2. Frontend saves tokens via `/api/v1/save-google-token`
-3. User browses Drive files → `/api/v1/google-drive-files`
-4. Backend fetches files from 'public' folder only (auto-refreshes expired tokens)
+3. User browses files → `/api/v1/google-drive-files`
+4. Backend fetches files (auto-refreshes expired tokens)
 5. User selects file → `/api/v1/ingest-google-drive-file`
 6. Backend:
-   - Download file from Google Drive (with retry logic for virus scan)
+   - Download file from cloud storage
    - Upload to Supabase storage
    - Follow standard ingestion pipeline (same as direct upload)
 
@@ -446,7 +488,7 @@ Managed via Supabase MCP server tools (available in Claude Code)
    - **IF route=text**:
      - Generate text embedding (all-MiniLM, 384D)
      - Query Pinecone text index
-     - BM25 reranking based on text content
+     - BM25 reranking based on text content (if enabled)
      - Add highlighting spans
    - **IF route=image**:
      - Generate CLIP text embedding (512D)
@@ -508,7 +550,7 @@ Managed via Supabase MCP server tools (available in Claude Code)
 ## Known Patterns
 
 ### Smart Variable Names
-Per CLAUDE.md: Use descriptive variable names (e.g., `embed_text_vectors`, `chunk_id`)
+Use descriptive variable names (e.g., `embed_text_vectors`, `chunk_id`)
 
 ### Multi-Index Strategy
 - 3 separate Pinecone indexes: Text (384D) + Image (512D) + Extracted Image (512D)
@@ -551,7 +593,7 @@ Configured for Nuxt frontend in main.py
 ### 3. Background Tagging (Uploaded Images Only)
 **Rationale**:
 - Non-blocking user experience
-- Disabled for extracted images (line 266 in ingest_common.py) to reduce processing time
+- Disabled for extracted images to reduce processing time
 - Two-stage pipeline ensures high precision (OWL-ViT verification)
 
 ### 4. Group Metadata Sync
@@ -566,11 +608,11 @@ Configured for Nuxt frontend in main.py
 - Automatic group selection based on user question
 - Query simplification for better retrieval
 
-### 6. Google Drive → Supabase Flow
+### 6. Cloud Storage → Supabase Flow
 **Rationale**:
-- Download file from Drive, upload to Supabase storage
+- Download file from cloud storage, upload to Supabase storage
 - Ensures data ownership and persistence
-- Standard ingestion pipeline (not direct Drive references)
+- Standard ingestion pipeline (not direct cloud references)
 
 ### 7. CLIP + OWL-ViT Two-Stage Tagging
 **Rationale**:
@@ -578,46 +620,53 @@ Configured for Nuxt frontend in main.py
 - OWL-ViT: Precise verification with localization (bounding boxes)
 - Balances speed and accuracy
 
+### 8. PowerPoint Conversion
+**Rationale**:
+- Converts PPT/PPTX to PDF for consistent processing
+- Reuses existing PDF extraction pipeline
+- Maintains original file reference
+
 ## Future Context Tips
 
-1. **When modifying search**: Check all 3 embedding types + BM25 logic in query.py
-2. **When adding file types**: Update SUPPORTED_TEXT/SUPPORTED_IMAGES in ingest_common.py
-3. **When changing chunking**: Update extract_text.py + re-ingest all documents
-4. **When modifying chat**: Check rag/graph.py LangGraph state machine (4 nodes)
-5. **When adding routes**: Add to respective router + register in main.py
+1. **When modifying search**: Check all 3 embedding types + BM25 logic in [query.py](backend/routers/query.py)
+2. **When adding file types**: Update SUPPORTED_TEXT/SUPPORTED_IMAGES in [ingest_common.py](backend/ingestion/ingest_common.py)
+3. **When changing chunking**: Update [extract_text.py](backend/ingestion/text/extract_text.py) + re-ingest all documents
+4. **When modifying chat**: Check [rag/graph.py](backend/rag/graph.py) LangGraph state machine (4 nodes)
+5. **When adding routes**: Add to respective router + register in [main.py](backend/main.py)
 6. **Security**: Always validate JWT and filter by user_id
 7. **Embeddings**: Match dimensions to Pinecone index (384D for text, 512D for images)
-8. **Google Drive**: Handle token refresh in gdrive.py (5-minute buffer)
-9. **Auto-tagging**: Only enabled for uploaded images (line 266 in ingest_common.py)
+8. **Cloud storage**: Handle token refresh in [gdrive.py](backend/routers/gdrive.py) and onedrive.py (5-minute buffer)
+9. **Auto-tagging**: Only enabled for uploaded images (configurable in [ingest_common.py](backend/ingestion/ingest_common.py))
 10. **Database schema changes**: Use Supabase MCP tools for migrations
+11. **PowerPoint files**: Automatically converted to PDF, then processed as PDFs
 
 ## Recent Changes (Last 5 Commits)
 
-1. **3cd9bcf**: "tagging? & download gdrive and store in supabase"
-   - Implemented full auto-tagging system (CLIP + OWL-ViT)
-   - Fixed Google Drive download → Supabase storage flow
+1. **f37653f**: "formatting?"
+   - Code formatting improvements
 
-2. **054981f**: "check gdrive public folder non recursive"
-   - Limited Google Drive to public folder only
+2. **141eafe**: "docka"
+   - Docker configuration updates
 
-3. **5dde7b5**: "mcp"
-   - Added MCP configuration for Claude Code
+3. **5b81bfa**: "security fixes"
+   - Security improvements and patches
 
-4. **88bab52**: "add images from drive"
-   - Google Drive image ingestion support
+4. **9fe7c5f**: "check if image is entirely one color"
+   - Image validation improvements
 
-5. **65a59d9**: "ghetto fix"
-   - Bug fix
+5. **fe5371b**: "ppt support"
+   - PowerPoint file support implementation
 
 ## Current Status
 - ✅ Core functionality complete and production-ready
 - ✅ Multi-modal search working (3 modes)
 - ✅ RAG chat implemented with LangGraph
-- ✅ Google Drive integration active with OAuth
+- ✅ Google Drive + OneDrive integration active with OAuth
 - ✅ Group management functional with Pinecone sync
 - ✅ Auto-tagging system (CLIP + OWL-ViT) for uploaded images
+- ✅ PowerPoint support with PDF conversion
 - ⚠️ Auto-tagging disabled for extracted images from PDFs/DOCX
-- 📝 Modified files: backend/config/object_labels.json (uncommitted)
+- 📝 Modified files: [backend/ingestion/text/extract_text.py](backend/ingestion/text/extract_text.py) (uncommitted changes)
 
 ## Known Limitations
 
@@ -626,3 +675,4 @@ Configured for Nuxt frontend in main.py
 3. **LLM**: Requires local Ollama server running
 4. **Token limits**: RAG context limited to 50,000 chars
 5. **File size**: No explicit size limits configured (handled by Supabase)
+6. **PowerPoint**: Requires conversion to PDF (may lose some formatting)

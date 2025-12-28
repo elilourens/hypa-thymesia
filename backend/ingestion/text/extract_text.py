@@ -23,6 +23,60 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md", ".ppt", ".pptx"}
 
 
+def normalize_text(text: str) -> str:
+    """
+    Minimal text normalization - only fixes character encoding issues.
+
+    This function:
+    - Normalizes bullet point characters to standard bullets (•)
+    - Normalizes non-breaking spaces to regular spaces
+    - Cleans up excessive whitespace
+    - Preserves ALL line breaks as-is from the PDF
+
+    Args:
+        text: The text to normalize
+
+    Returns:
+        Normalized text with fixed characters but original line breaks
+    """
+    import re
+
+    # Normalize line endings
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    # Normalize bullet characters to standard bullet (•)
+    bullet_chars = [
+        '\uf06c',  # Private use area bullet (common in PDFs)
+        '\uf0b7',  # Another private use area bullet
+        '\u2022',  # Standard bullet (keeping as-is)
+        '\u25cf',  # Black circle
+        '\u25e6',  # White bullet
+        '\u2023',  # Triangular bullet
+        '\u2043',  # Hyphen bullet
+        '\u204c',  # Black leftwards bullet
+        '\u204d',  # Black rightwards bullet
+        '\u2219',  # Bullet operator
+        '\u25aa',  # Black small square
+        '\u25ab',  # White small square
+        '\u25a0',  # Black square
+    ]
+
+    for bullet_char in bullet_chars:
+        text = text.replace(bullet_char, '• ')
+
+    # Normalize non-breaking spaces to regular spaces
+    text = text.replace('\xa0', ' ')
+    text = text.replace('\u2060', '')  # Remove word joiners
+
+    # Clean up multiple spaces (but preserve newlines)
+    text = re.sub(r' +', ' ', text)
+
+    # Clean up excessive newlines (max 3 consecutive = 2 blank lines)
+    text = re.sub(r'\n{4,}', '\n\n\n', text)
+
+    return text.strip()
+
+
 def _pick_loader(file_path: str):
     """Pick appropriate loader based on file extension."""
     ext = os.path.splitext(file_path)[1].lower()
@@ -135,8 +189,18 @@ def extract_text_metadata(
         for chunk_text, start, end in splits:
             if not chunk_text.strip():
                 continue
+
+            # Debug: Log original chunk text to understand the input
+            if idx < 2:  # Only log first 2 documents to avoid spam
+                logger.info(f"ORIGINAL CHUNK TEXT (first 200 chars):\n{repr(chunk_text[:200])}")
+
+            normalized = normalize_text(chunk_text)
+
+            if idx < 2:
+                logger.info(f"NORMALIZED CHUNK TEXT (first 200 chars):\n{repr(normalized[:200])}")
+
             out.append({
-                "chunk_text": chunk_text.strip(),
+                "chunk_text": normalized,
                 "pdf_name": name,
                 "page_number": page_num,
                 "user_id": user_id,
