@@ -223,7 +223,7 @@ watch(
 
         <!-- Render text hits -->
         <div v-if="(r.metadata?.modality || '').toLowerCase() === 'text'">
-          <p>{{ r.metadata?.text }}</p>
+          <p class="whitespace-pre-line">{{ r.metadata?.text }}</p>
 
           <!-- Display document tags if available -->
           <div v-if="r.metadata?.tags && r.metadata.tags.length > 0" class="mt-3 space-y-2">
