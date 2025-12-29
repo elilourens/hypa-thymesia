@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useIngest } from '@/composables/useIngest'
 import { useGroupsApi } from '@/composables/useGroups'
 import { useQuota } from '@/composables/useQuota'
@@ -10,14 +10,13 @@ import OneDriveLinkCard from '@/components/OneDriveLinkCard.vue'
 
 const { uploadFile } = useIngest()
 const { createGroup } = useGroupsApi()
-const { getQuota, isQuotaError, getQuotaFromError } = useQuota()
+const { isQuotaError, getQuotaFromError } = useQuota()
 
 // UI state
 const files = ref<File[]>([])
 const error = ref<string | null>(null)
 const success = ref<string | null>(null)
 const uploading = ref(false)
-const quotaInfo = ref<{ current_count: number; max_files: number; remaining: number } | null>(null)
 
 // Group mode: none, pick existing, or create new
 const groupMode = ref<'none' | 'existing' | 'create'>('none')
@@ -55,14 +54,6 @@ async function resolveGroupId(): Promise<string | undefined> {
   return undefined // "none"
 }
 
-async function loadQuota() {
-  try {
-    quotaInfo.value = await getQuota()
-  } catch (e: any) {
-    console.error('Failed to load quota:', e)
-  }
-}
-
 async function doUpload(): Promise<void> {
   error.value = null
   success.value = null
@@ -89,26 +80,17 @@ async function doUpload(): Promise<void> {
     const quotaError = rejectedReasons.find(e => isQuotaError(e))
     if (quotaError) {
       const quotaData = getQuotaFromError(quotaError)
-      if (quotaData) {
-        quotaInfo.value = quotaData
-      }
-      error.value = `Upload limit reached: You have ${quotaData?.current_count || 0} of ${quotaData?.max_files || 50} files. Upgrade your plan to upload more.`
+      error.value = `Upload limit reached: You have ${quotaData?.current_count || 0} of ${quotaData?.max_files || 50} files. Check the Usage tab for more details.`
     } else {
       if (ok > 0) success.value = `Uploaded ${ok} file${ok === 1 ? '' : 's'}`
       if (failed > 0) error.value = `Failed to upload ${failed} file${failed === 1 ? '' : 's'}`
     }
 
     if (ok === results.length) files.value = []
-
-    // Refresh quota after successful uploads
-    if (ok > 0) await loadQuota()
   } catch (e: any) {
     if (isQuotaError(e)) {
       const quotaData = getQuotaFromError(e)
-      if (quotaData) {
-        quotaInfo.value = quotaData
-      }
-      error.value = `Upload limit reached: You have ${quotaData?.current_count || 0} of ${quotaData?.max_files || 50} files. Upgrade your plan to upload more.`
+      error.value = `Upload limit reached: You have ${quotaData?.current_count || 0} of ${quotaData?.max_files || 50} files. Check the Usage tab for more details.`
     } else {
       error.value = e?.message ?? 'Upload failed'
     }
@@ -116,10 +98,6 @@ async function doUpload(): Promise<void> {
     uploading.value = false
   }
 }
-
-onMounted(() => {
-  loadQuota()
-})
 </script>
 
 <template>
@@ -144,9 +122,7 @@ onMounted(() => {
       <USeparator orientation="vertical" class="h-auto self-stretch" size="lg"/>
 
       <!-- Right side: Groups and Upload -->
-      <div class="flex-1 flex gap-4">
-        <!-- Groups section -->
-        <div class="flex-1 space-y-3">
+      <div class="flex-1 space-y-3">
           <label class="block text-sm font-medium">Attach to a group</label>
 
           <!-- Mode switch -->
@@ -203,50 +179,6 @@ onMounted(() => {
           <!-- Messages -->
           <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
           <p v-if="success" class="text-green-600 text-sm">{{ success }}</p>
-        </div>
-
-        <!-- Quota sidebar on the right -->
-        <div v-if="quotaInfo" class="w-96 p-6 bg-zinc-900 rounded-lg self-start border border-zinc-800">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-sm font-medium text-zinc-200">
-              File Storage
-            </span>
-          </div>
-
-          <div class="text-center mb-4">
-            <div class="text-4xl font-bold" :class="{
-              'text-white': quotaInfo.remaining > 10,
-              'text-orange-400': quotaInfo.remaining <= 10 && quotaInfo.remaining > 5,
-              'text-red-400': quotaInfo.remaining <= 5
-            }">
-              {{ quotaInfo.current_count }}
-            </div>
-            <div class="text-sm text-zinc-400">
-              of {{ quotaInfo.max_files }} files
-            </div>
-          </div>
-
-          <UProgress
-            :model-value="(quotaInfo.current_count / quotaInfo.max_files) * 100"
-            :color="quotaInfo.remaining <= 5 ? 'error' : quotaInfo.remaining <= 10 ? 'warning' : 'primary'"
-            size="md"
-          />
-
-          <div class="mt-4 text-center">
-            <span class="text-sm text-zinc-400">
-              {{ quotaInfo.remaining }} remaining
-            </span>
-          </div>
-
-          <div v-if="quotaInfo.remaining <= 10" class="mt-4 text-center">
-            <span class="text-sm font-medium" :class="{
-              'text-orange-400': quotaInfo.remaining > 5,
-              'text-red-400': quotaInfo.remaining <= 5
-            }">
-              {{ quotaInfo.remaining <= 5 ? '⚠️ Almost full!' : '⚠️ Running low' }}
-            </span>
-          </div>
-        </div>
       </div>
     </div>
   </BodyCard>

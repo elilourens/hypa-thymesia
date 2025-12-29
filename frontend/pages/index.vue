@@ -253,6 +253,7 @@ onMounted(() => {
     <span class="file-type">DOCX</span>
     <span class="file-type">JPEG</span>
     <span class="file-type">PNG</span>
+    <span class="file-type">PPT</span>
   </UMarquee>
 </BodyCard>
 
