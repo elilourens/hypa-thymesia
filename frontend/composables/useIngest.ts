@@ -16,7 +16,15 @@ export function useIngest() {
 
   // --- Upload ---
 
-  async function uploadFile(file: File, groupId?: string, enableTagging: boolean = true) {
+  interface UploadResponse {
+    doc_id: string
+    status: 'queued' | 'processing' | 'completed' | 'failed'
+    message: string
+    filename: string
+    storage_path: string
+  }
+
+  async function uploadFile(file: File, groupId?: string, enableTagging: boolean = true): Promise<UploadResponse> {
     try {
       const headers = await authHeaders()
       const fd = new FormData()
@@ -24,14 +32,65 @@ export function useIngest() {
       if (groupId) fd.append('group_id', groupId)
       fd.append('enable_tagging', enableTagging.toString())
 
-      await $fetch(`${API_BASE}/ingest/upload-text-and-images`, {
+      const response = await $fetch<UploadResponse>(`${API_BASE}/ingest/upload-text-and-images`, {
         method: 'POST',
         headers,
         body: fd,
       })
+
+      return response
     } catch (err: any) {
       throw new Error(err?.data || err?.message || 'Upload failed')
     }
+  }
+
+  // --- Get processing status ---
+
+  interface ProcessingStatus {
+    doc_id: string
+    status: 'queued' | 'processing' | 'completed' | 'failed'
+    filename: string | null
+    text_chunks_count: number
+    images_count: number
+    error_message: string | null
+  }
+
+  async function getProcessingStatus(docId: string): Promise<ProcessingStatus> {
+    try {
+      const headers = await authHeaders()
+      return await $fetch<ProcessingStatus>(`${API_BASE}/ingest/processing-status/${docId}`, {
+        method: 'GET',
+        headers,
+      })
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Failed to get processing status')
+    }
+  }
+
+  // --- Poll processing status until complete ---
+
+  async function pollProcessingStatus(
+    docId: string,
+    onUpdate?: (status: ProcessingStatus) => void,
+    maxAttempts: number = 60,
+    intervalMs: number = 2000
+  ): Promise<ProcessingStatus> {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const status = await getProcessingStatus(docId)
+
+      if (onUpdate) {
+        onUpdate(status)
+      }
+
+      if (status.status === 'completed' || status.status === 'failed') {
+        return status
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+
+    throw new Error('Processing timeout: file took too long to process')
   }
 
   // ---- Types for queries ----
@@ -252,6 +311,8 @@ export function useIngest() {
 
   return {
     uploadFile,
+    getProcessingStatus,
+    pollProcessingStatus,
     queryText,
     queryImage,
     deleteDoc,

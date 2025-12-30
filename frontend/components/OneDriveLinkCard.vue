@@ -7,6 +7,11 @@ const UBadge = resolveComponent('UBadge')
 const UCheckbox = resolveComponent('UCheckbox')
 const UIcon = resolveComponent('UIcon')
 
+const props = defineProps<{
+  groupId?: string
+  enableTagging?: boolean
+}>()
+
 interface OneDriveFile {
   id: string
   name: string
@@ -354,7 +359,9 @@ async function handleImportFiles() {
             filename: file.name,
             mime_type: file.mimeType || 'application/octet-stream',
             size_bytes: file.size || 0,
-            extract_deep_embeds: true
+            extract_deep_embeds: true,
+            group_id: props.groupId,
+            enable_tagging: props.enableTagging ?? true
           }
         )
 
@@ -538,8 +545,16 @@ function getRowId(row: OneDriveFile) {
 
           <!-- Action Bar -->
           <div class="flex items-center justify-between gap-2">
-            <div class="text-sm text-muted">
-              {{ selectedRowIds().length }} selected
+            <div class="flex items-center gap-2">
+              <div class="text-sm text-muted">
+                {{ selectedRowIds().length }} Groups selected
+              </div>
+              <UBadge v-if="props.groupId" variant="subtle" color="primary">
+                Group
+              </UBadge>
+              <UBadge variant="outline" color="primary">
+                {{ props.enableTagging ? 'Tagging On' : 'Tagging Off' }}
+              </UBadge>
             </div>
             <UButton
               @click="handleImportFiles"

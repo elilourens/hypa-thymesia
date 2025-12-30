@@ -8,7 +8,7 @@ import BodyCard from '@/components/BodyCard.vue'
 import GoogleDriveLinkCard from '@/components/GoogleDriveLinkCard.vue'
 import OneDriveLinkCard from '@/components/OneDriveLinkCard.vue'
 
-const { uploadFile } = useIngest()
+const { uploadFile, pollProcessingStatus } = useIngest()
 const { createGroup } = useGroupsApi()
 const { isQuotaError, getQuotaFromError } = useQuota()
 
@@ -18,6 +18,17 @@ const error = ref<string | null>(null)
 const success = ref<string | null>(null)
 const uploading = ref(false)
 
+// Processing status tracking
+interface FileProcessing {
+  filename: string
+  status: 'uploading' | 'queued' | 'processing' | 'completed' | 'failed'
+  doc_id?: string
+  text_chunks?: number
+  images?: number
+  error_message?: string
+}
+const processingFiles = ref<FileProcessing[]>([])
+
 // Group mode: none, pick existing, or create new
 const groupMode = ref<'none' | 'existing' | 'create'>('none')
 const selectedGroupId = ref<string | null>(null)
@@ -25,6 +36,13 @@ const newGroupName = ref('')
 
 // Tagging option
 const enableTagging = ref(true)
+
+// Clear finished processing files
+function clearFinished() {
+  processingFiles.value = processingFiles.value.filter(
+    f => f.status === 'uploading' || f.status === 'queued' || f.status === 'processing'
+  )
+}
 
 // Enable upload only when conditions are met
 const canUpload = computed(() => {
@@ -70,9 +88,65 @@ async function doUpload(): Promise<void> {
 
   try {
     uploading.value = true
-    const results = await Promise.allSettled(
-      files.value.map(f => uploadFile(f, groupId, enableTagging.value))
-    )
+
+    // Initialize processing status for each file (append to existing)
+    const startIdx = processingFiles.value.length
+    const newFiles = files.value.map(f => ({
+      filename: f.name,
+      status: 'uploading' as const,
+    }))
+    processingFiles.value = [...processingFiles.value, ...newFiles]
+
+    // Upload all files (fast - just uploads to storage)
+    const uploadPromises = files.value.map(async (file, idx) => {
+      const arrayIdx = startIdx + idx
+      try {
+        const response = await uploadFile(file, groupId, enableTagging.value)
+
+        // Update to queued
+        processingFiles.value[arrayIdx] = {
+          filename: file.name,
+          status: response.status,
+          doc_id: response.doc_id,
+        }
+
+        // Start polling for processing status in background
+        pollProcessingStatus(
+          response.doc_id,
+          (status) => {
+            // Update status in real-time
+            processingFiles.value[arrayIdx] = {
+              filename: file.name,
+              status: status.status,
+              doc_id: status.doc_id,
+              text_chunks: status.text_chunks_count,
+              images: status.images_count,
+              error_message: status.error_message || undefined,
+            }
+          }
+        ).catch(err => {
+          console.error(`Polling failed for ${file.name}:`, err)
+          processingFiles.value[arrayIdx] = {
+            filename: file.name,
+            status: 'failed',
+            doc_id: processingFiles.value[arrayIdx]?.doc_id,
+            error_message: err.message,
+          }
+        })
+
+        return response
+      } catch (err) {
+        processingFiles.value[arrayIdx] = {
+          filename: file.name,
+          status: 'failed',
+          error_message: String(err),
+        }
+        throw err
+      }
+    })
+
+    const results = await Promise.allSettled(uploadPromises)
+
     const ok = results.filter(r => r.status === 'fulfilled').length
     const failed = results.length - ok
     const rejectedReasons = results
@@ -85,11 +159,18 @@ async function doUpload(): Promise<void> {
       const quotaData = getQuotaFromError(quotaError)
       error.value = `Upload limit reached: You have ${quotaData?.current_count || 0} of ${quotaData?.max_files || 50} files. Check the Usage tab for more details.`
     } else {
-      if (ok > 0) success.value = `Uploaded ${ok} file${ok === 1 ? '' : 's'}`
-      if (failed > 0) error.value = `Failed to upload ${failed} file${failed === 1 ? '' : 's'}`
+      if (ok > 0) {
+        success.value = `${ok} file${ok === 1 ? '' : 's'} uploaded and processing in background`
+      }
+      if (failed > 0) {
+        error.value = `Failed to upload ${failed} file${failed === 1 ? '' : 's'}`
+      }
     }
 
-    if (ok === results.length) files.value = []
+    if (ok === results.length) {
+      files.value = []
+      uploading.value = false
+    }
   } catch (e: any) {
     if (isQuotaError(e)) {
       const quotaData = getQuotaFromError(e)
@@ -97,7 +178,6 @@ async function doUpload(): Promise<void> {
     } else {
       error.value = e?.message ?? 'Upload failed'
     }
-  } finally {
     uploading.value = false
   }
 }
@@ -187,16 +267,82 @@ async function doUpload(): Promise<void> {
           <p v-if="success" class="text-green-600 text-sm">{{ success }}</p>
       </div>
     </div>
+
+    <!-- Processing Status -->
+    <div v-if="processingFiles.length > 0" class="mt-6 pt-6 border-t border-zinc-800">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-base">Processing Status</h2>
+        <UButton
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          @click="clearFinished"
+          icon="i-heroicons-x-mark"
+        >
+          Clear Finished
+        </UButton>
+      </div>
+      <div class="space-y-2">
+        <div
+          v-for="(file, idx) in processingFiles"
+          :key="idx"
+          class="flex items-center justify-between p-3 bg-zinc-900 rounded-lg border border-zinc-800"
+        >
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium truncate">{{ file.filename }}</p>
+            <div class="flex items-center gap-2 mt-1">
+              <span
+                class="text-xs px-2 py-0.5 rounded-full"
+                :class="{
+                  'bg-blue-500/20 text-blue-400': file.status === 'uploading',
+                  'bg-yellow-500/20 text-yellow-400': file.status === 'queued',
+                  'bg-purple-500/20 text-purple-400': file.status === 'processing',
+                  'bg-green-500/20 text-green-400': file.status === 'completed',
+                  'bg-red-500/20 text-red-400': file.status === 'failed',
+                }"
+              >
+                {{ file.status }}
+              </span>
+              <span v-if="file.text_chunks || file.images" class="text-xs text-zinc-500">
+                <span v-if="file.text_chunks">{{ file.text_chunks }} chunks</span>
+                <span v-if="file.text_chunks && file.images"> • </span>
+                <span v-if="file.images">{{ file.images }} images</span>
+              </span>
+            </div>
+            <p v-if="file.error_message" class="text-xs text-red-400 mt-1">
+              {{ file.error_message }}
+            </p>
+          </div>
+          <div class="ml-4">
+            <UIcon
+              v-if="file.status === 'uploading' || file.status === 'queued' || file.status === 'processing'"
+              name="i-heroicons-arrow-path"
+              class="animate-spin text-zinc-400"
+            />
+            <UIcon
+              v-else-if="file.status === 'completed'"
+              name="i-heroicons-check-circle"
+              class="text-green-400"
+            />
+            <UIcon
+              v-else-if="file.status === 'failed'"
+              name="i-heroicons-x-circle"
+              class="text-red-400"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
   </BodyCard>
 
   <!-- Google Drive Import Section -->
   <BodyCard class="">
-    <GoogleDriveLinkCard />
+    <GoogleDriveLinkCard :group-id="selectedGroupId || undefined" :enable-tagging="enableTagging" />
   </BodyCard>
 
   <!-- OneDrive Import Section -->
   <BodyCard class="">
-    <OneDriveLinkCard />
+    <OneDriveLinkCard :group-id="selectedGroupId || undefined" :enable-tagging="enableTagging" />
   </BodyCard>
 </template>
 

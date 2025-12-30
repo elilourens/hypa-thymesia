@@ -25,6 +25,7 @@ class IngestGoogleDriveFileRequest(BaseModel):
     size_bytes: int
     group_id: Optional[str] = None
     extract_deep_embeds: bool = True
+    enable_tagging: bool = True
 
 
 def _get_stored_token(user_id: str, supabase, provider: str = "google"):
@@ -329,6 +330,7 @@ async def ingest_google_drive_file(
             storage_path=storage_path,
             extract_deep_embeds=request.extract_deep_embeds,
             group_id=request.group_id,
+            enable_tagging=request.enable_tagging,
             storage_metadata={
                 "source": "google_drive",
                 "external_id": request.google_drive_id,

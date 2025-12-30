@@ -446,6 +446,8 @@ export const useGoogleDrive = () => {
       mime_type: string
       size_bytes: number
       extract_deep_embeds?: boolean
+      group_id?: string
+      enable_tagging?: boolean
     }
   ): Promise<any> => {
     try {

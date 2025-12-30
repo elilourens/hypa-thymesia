@@ -1,7 +1,8 @@
 import logging
 from typing import Optional
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, Form
 from core.config import get_settings
 from core.deps import get_supabase
 from core.security import get_current_user, AuthUser
@@ -14,18 +15,86 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 
+async def process_file_background(
+    file_content: bytes,
+    filename: str,
+    mime_type: str,
+    user_id: str,
+    doc_id: str,
+    storage_path: str,
+    extract_deep_embeds: bool,
+    group_id: Optional[str],
+    enable_tagging: bool,
+):
+    """
+    Background task to process file ingestion.
+    This runs asynchronously after the API returns to the user.
+    """
+    from core.deps import get_supabase
+    from core.config import get_settings
+
+    supabase = get_supabase()
+    settings = get_settings()
+
+    try:
+        # Update status to processing
+        supabase.table("app_doc_meta").update({
+            "processing_status": "processing"
+        }).eq("doc_id", doc_id).execute()
+
+        logger.info(f"Background processing started: {filename} (doc_id={doc_id})")
+
+        # Process the file
+        result = await ingest_file_content(
+            file_content=file_content,
+            filename=filename,
+            mime_type=mime_type,
+            user_id=user_id,
+            supabase=supabase,
+            settings=settings,
+            storage_path=storage_path,
+            extract_deep_embeds=extract_deep_embeds,
+            group_id=group_id,
+            enable_tagging=enable_tagging,
+            doc_id=doc_id,  # Pass doc_id to use existing record
+        )
+
+        # Update status to completed
+        supabase.table("app_doc_meta").update({
+            "processing_status": "completed",
+            "text_chunks_count": result.get("text_chunks_ingested", 0),
+            "images_count": result.get("images_extracted", 0),
+        }).eq("doc_id", doc_id).execute()
+
+        logger.info(f"Background processing completed: {filename} (doc_id={doc_id})")
+
+    except Exception as e:
+        logger.error(f"Background processing failed for {filename} (doc_id={doc_id}): {e}", exc_info=True)
+
+        # Update status to failed
+        try:
+            supabase.table("app_doc_meta").update({
+                "processing_status": "failed",
+                "error_message": str(e)[:500]  # Limit error message length
+            }).eq("doc_id", doc_id).execute()
+        except Exception as update_error:
+            logger.error(f"Failed to update error status: {update_error}")
+
+
 @router.post("/upload-text-and-images")
 async def ingest_text_and_image_files(
     file: UploadFile = File(...),
     group_id: Optional[str] = Form(None),
     extract_deep_embeds: bool = Form(True),
     enable_tagging: bool = Form(True),
+    background_tasks: BackgroundTasks = None,
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
     settings = Depends(get_settings),
 ):
     """
-    Ingest a file by uploading it to storage and extracting text/images.
+    Ingest a file by uploading it to storage and processing in background.
+    Returns immediately with doc_id and status='processing'.
     """
     user_id = auth.id
 
@@ -39,9 +108,11 @@ async def ingest_text_and_image_files(
 
     logger.debug(f"Upload started: {file.filename}, size: {len(content)} bytes, extract_deep_embeds: {extract_deep_embeds}")
 
-    # --- Upload file to storage ---
+    # Generate doc_id upfront
+    doc_id = str(uuid4())
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    
+
+    # --- Upload file to storage FIRST (fast operation) ---
     try:
         # Determine storage path based on file type
         if ext in ("png", "jpeg", "jpg", "webp"):
@@ -53,10 +124,10 @@ async def ingest_text_and_image_files(
                 file.filename,
                 mime_type=file.content_type,
             )
-        
+
         if not storage_path:
             raise HTTPException(500, detail="Failed to upload file to storage")
-        
+
         logger.debug(f"Uploaded to storage: {storage_path}")
     except HTTPException:
         raise
@@ -64,24 +135,98 @@ async def ingest_text_and_image_files(
         logger.error(f"Error uploading to storage: {e}", exc_info=True)
         raise HTTPException(500, detail="Failed to upload file to storage")
 
-    # --- Ingest file content using shared logic ---
+    # --- Create doc_meta record with 'queued' status ---
     try:
-        result = await ingest_file_content(
+        from utils.db_helpers import ensure_doc_meta
+        ensure_doc_meta(supabase, user_id=user_id, doc_id=doc_id, group_id=group_id)
+
+        # Update with initial status and filename
+        supabase.table("app_doc_meta").update({
+            "processing_status": "queued",
+            "filename": file.filename,
+            "mime_type": file.content_type,
+            "storage_path": storage_path,
+        }).eq("doc_id", doc_id).execute()
+
+        logger.info(f"Created doc_meta record: doc_id={doc_id}, status=queued")
+    except Exception as e:
+        logger.error(f"Error creating doc_meta: {e}", exc_info=True)
+        raise HTTPException(500, detail="Failed to create document record")
+
+    # --- Queue background processing ---
+    if background_tasks:
+        background_tasks.add_task(
+            process_file_background,
             file_content=content,
             filename=file.filename,
             mime_type=file.content_type,
             user_id=user_id,
-            supabase=supabase,
-            settings=settings,
+            doc_id=doc_id,
             storage_path=storage_path,
             extract_deep_embeds=extract_deep_embeds,
             group_id=group_id,
             enable_tagging=enable_tagging,
         )
-        logger.debug(f"File ingestion complete: {result}")
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        logger.info(f"Queued background processing: {file.filename} (doc_id={doc_id})")
+    else:
+        # Fallback: process synchronously if BackgroundTasks not available
+        logger.warning("BackgroundTasks not available, processing synchronously")
+        await process_file_background(
+            file_content=content,
+            filename=file.filename,
+            mime_type=file.content_type,
+            user_id=user_id,
+            doc_id=doc_id,
+            storage_path=storage_path,
+            extract_deep_embeds=extract_deep_embeds,
+            group_id=group_id,
+            enable_tagging=enable_tagging,
+        )
+
+    # --- Return immediately ---
+    return {
+        "doc_id": doc_id,
+        "status": "queued",
+        "message": "File uploaded successfully. Processing in background.",
+        "filename": file.filename,
+        "storage_path": storage_path,
+    }
+
+
+@router.get("/processing-status/{doc_id}")
+async def get_processing_status(
+    doc_id: str,
+    auth: AuthUser = Depends(get_current_user),
+    supabase = Depends(get_supabase),
+):
+    """
+    Get the processing status of a document.
+    Returns status (queued, processing, completed, failed) and additional metadata.
+    """
+    user_id = auth.id
+
+    try:
+        # Query doc_meta for status
+        response = supabase.table("app_doc_meta").select(
+            "doc_id, processing_status, filename, text_chunks_count, images_count, error_message"
+        ).eq("doc_id", doc_id).eq("user_id", user_id).execute()
+
+        if not response.data or len(response.data) == 0:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        doc_meta = response.data[0]
+
+        return {
+            "doc_id": doc_meta["doc_id"],
+            "status": doc_meta.get("processing_status", "unknown"),
+            "filename": doc_meta.get("filename"),
+            "text_chunks_count": doc_meta.get("text_chunks_count", 0),
+            "images_count": doc_meta.get("images_count", 0),
+            "error_message": doc_meta.get("error_message"),
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error during ingestion: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+        logger.error(f"Error getting processing status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get processing status")
