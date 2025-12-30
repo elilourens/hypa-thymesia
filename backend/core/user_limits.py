@@ -8,12 +8,17 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_FILES = 50  # Free tier default
+PREMIUM_MAX_FILES = 100  # Premium tier (£2.99/month)
 
 
 def get_user_max_files(supabase, user_id: str) -> int:
     """
     Get the maximum number of files a user can upload.
     Returns the max_files limit from user_settings, or default if not set.
+
+    The max_files value is automatically set based on subscription status:
+    - Free tier: 50 files
+    - Premium tier (£2.99/month): 100 files
 
     Args:
         supabase: Supabase client
@@ -23,10 +28,22 @@ def get_user_max_files(supabase, user_id: str) -> int:
         Maximum number of files allowed (defaults to 50 for free tier)
     """
     try:
-        response = supabase.table("user_settings").select("max_files").eq("user_id", user_id).execute()
+        response = supabase.table("user_settings").select("max_files, stripe_subscription_status").eq("user_id", user_id).execute()
 
         if response.data and len(response.data) > 0:
-            return response.data[0]["max_files"]
+            settings = response.data[0]
+            max_files = settings.get("max_files", DEFAULT_MAX_FILES)
+
+            # Verify subscription status matches max_files
+            # This is a safety check in case of data inconsistency
+            subscription_status = settings.get("stripe_subscription_status")
+            if subscription_status in ["active", "trialing"]:
+                # Should be premium tier
+                if max_files < PREMIUM_MAX_FILES:
+                    logger.warning(f"User {user_id} has active subscription but max_files={max_files}, expected {PREMIUM_MAX_FILES}")
+                    return PREMIUM_MAX_FILES
+
+            return max_files
 
         # If no settings exist, return default
         return DEFAULT_MAX_FILES

@@ -1,5 +1,0 @@
-<template>
-    <BodyCard>
-        
-    </BodyCard>
-</template>
