@@ -101,7 +101,7 @@ def ingest_deep_embed_images(
     if existing_chunks.data and len(existing_chunks.data) > 0:
         max_chunk_index = existing_chunks.data[0]["chunk_index"]
     
-    logger.info(f"Starting image chunk_index at {max_chunk_index + 1} (max existing: {max_chunk_index})")
+    logger.debug(f"Starting image chunk_index at {max_chunk_index + 1} (max existing: {max_chunk_index})")
     
     chunk_rows = []
     vectors = []

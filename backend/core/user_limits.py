@@ -90,17 +90,30 @@ def check_user_can_upload(supabase, user_id: str) -> dict:
     max_files = get_user_max_files(supabase, user_id)
 
     can_upload = current_count < max_files
-    remaining = max_files - current_count
+    remaining = max(0, max_files - current_count)  # Ensure remaining is never negative
+    over_limit = max(0, current_count - max_files)  # How many files over the limit
 
     if not can_upload:
+        # Determine appropriate message based on whether they're over limit
+        if over_limit > 0:
+            # User downgraded and is over their limit
+            message = (
+                f"Your account has {current_count} files but your current plan allows {max_files} files. "
+                f"Please delete {over_limit} file(s) before uploading new ones, or upgrade to premium to access more storage."
+            )
+        else:
+            # User is at exactly their limit
+            message = f"You have reached your file upload limit of {max_files} files. Upgrade your plan to upload more files."
+
         raise HTTPException(
             status_code=403,
             detail={
                 "error": "file_limit_reached",
-                "message": f"You have reached your file upload limit of {max_files} files. Upgrade your plan to upload more files.",
+                "message": message,
                 "current_count": current_count,
                 "max_files": max_files,
-                "remaining": 0
+                "remaining": 0,
+                "over_limit": over_limit
             }
         )
 
@@ -109,6 +122,45 @@ def check_user_can_upload(supabase, user_id: str) -> dict:
         "current_count": current_count,
         "max_files": max_files,
         "remaining": remaining
+    }
+
+
+def get_user_quota_status(supabase, user_id: str) -> dict:
+    """
+    Get detailed quota status for a user, including whether they're over their limit.
+    This is useful for displaying warnings/notifications in the UI.
+
+    Args:
+        supabase: Supabase client
+        user_id: User ID to check
+
+    Returns:
+        Dict with:
+        - current_count: Number of files currently stored
+        - max_files: Maximum files allowed on current plan
+        - remaining: Files remaining (0 if over limit)
+        - over_limit: Number of files over the limit (0 if under)
+        - is_over_limit: Boolean indicating if user exceeded their quota
+        - can_upload: Boolean indicating if new uploads are allowed
+        - percentage_used: Percentage of quota used (capped at 100)
+    """
+    current_count = get_user_file_count(supabase, user_id)
+    max_files = get_user_max_files(supabase, user_id)
+
+    remaining = max(0, max_files - current_count)
+    over_limit = max(0, current_count - max_files)
+    is_over_limit = current_count > max_files
+    can_upload = current_count < max_files
+    percentage_used = min(100, int((current_count / max_files) * 100)) if max_files > 0 else 0
+
+    return {
+        "current_count": current_count,
+        "max_files": max_files,
+        "remaining": remaining,
+        "over_limit": over_limit,
+        "is_over_limit": is_over_limit,
+        "can_upload": can_upload,
+        "percentage_used": percentage_used
     }
 
 

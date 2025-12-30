@@ -148,8 +148,8 @@ def extract_text_metadata(
     """
     Generic extractor using LangChain loaders with character overlap and offsets.
     """
-    logger.info(f"Starting text extraction from: {file_path}")
-    
+    logger.debug(f"Starting text extraction from: {file_path}")
+
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
         raise FileNotFoundError(file_path)
@@ -159,12 +159,12 @@ def extract_text_metadata(
         logger.error(f"Unsupported file type: {ext}")
         raise ValueError(f"Unsupported file type: {ext}")
 
-    logger.info(f"File extension: {ext}")
+    logger.debug(f"File extension: {ext}")
     kind, loader = _pick_loader(file_path)
-    logger.info(f"Using loader: {kind}")
+    logger.debug(f"Using loader: {kind}")
 
     docs = loader.load() or []
-    logger.info(f"Loaded {len(docs)} document(s)")
+    logger.debug(f"Loaded {len(docs)} document(s)")
 
     ts = datetime.utcnow().isoformat()
     name = _base_name_no_ext(file_path)
@@ -192,12 +192,12 @@ def extract_text_metadata(
 
             # Debug: Log original chunk text to understand the input
             if idx < 2:  # Only log first 2 documents to avoid spam
-                logger.info(f"ORIGINAL CHUNK TEXT (first 200 chars):\n{repr(chunk_text[:200])}")
+                logger.debug(f"ORIGINAL CHUNK TEXT (first 200 chars):\n{repr(chunk_text[:200])}")
 
             normalized = normalize_text(chunk_text)
 
             if idx < 2:
-                logger.info(f"NORMALIZED CHUNK TEXT (first 200 chars):\n{repr(normalized[:200])}")
+                logger.debug(f"NORMALIZED CHUNK TEXT (first 200 chars):\n{repr(normalized[:200])}")
 
             out.append({
                 "chunk_text": normalized,
@@ -209,7 +209,7 @@ def extract_text_metadata(
                 "char_end": end,
             })
 
-    logger.info(f"Extracted {len(out)} text chunks")
+    logger.debug(f"Extracted {len(out)} text chunks")
     return {"text_chunks": out}
 
 
@@ -275,14 +275,14 @@ def extract_images_from_pdf(
     filter_important: bool = True,
 ) -> List[Dict[str, Any]]:
     """Extract images from PDF using PyMuPDF."""
-    logger.info(f"Starting PDF image extraction from: {file_path}")
-    logger.info(f"Filter important: {filter_important}")
+    logger.debug(f"Starting PDF image extraction from: {file_path}")
+    logger.debug(f"Filter important: {filter_important}")
 
     doc = fitz.open(file_path)
     doc_name = _base_name_no_ext(file_path)
     ts = datetime.utcnow().isoformat()
 
-    logger.info(f"PDF has {len(doc)} pages")
+    logger.debug(f"PDF has {len(doc)} pages")
 
     images = []
     total_images_found = 0
@@ -294,7 +294,7 @@ def extract_images_from_pdf(
         page = doc[page_num]
         image_list = page.get_images(full=True)
 
-        logger.info(f"Page {page_num + 1}: Found {len(image_list)} image(s)")
+        logger.debug(f"Page {page_num + 1}: Found {len(image_list)} image(s)")
 
         for img_index, img_info in enumerate(image_list):
             total_images_found += 1
@@ -382,7 +382,7 @@ def extract_images_from_pdf(
                     "bbox": bbox,
                 })
 
-                logger.info(f"  ✅ Kept image {img_index}: {pil_image.width}x{pil_image.height} (original mode: {original_mode})")
+                logger.debug(f"  ✅ Kept image {img_index}: {pil_image.width}x{pil_image.height} (original mode: {original_mode})")
 
             except Exception as e:
                 logger.error(f"  ❌ Error processing image {img_index} on page {page_num + 1}: {e}")
@@ -390,11 +390,7 @@ def extract_images_from_pdf(
 
     doc.close()
 
-    logger.info(f"PDF extraction complete:")
-    logger.info(f"  - Total images found: {total_images_found}")
-    logger.info(f"  - Duplicates skipped: {duplicates_skipped}")
-    logger.info(f"  - Images passed filter: {images_passed_filter}")
-    logger.info(f"  - Images filtered out: {total_images_found - duplicates_skipped - images_passed_filter}")
+    logger.info(f"PDF extraction: {total_images_found} images found, {images_passed_filter} kept, {duplicates_skipped} duplicates")
 
     return images
 
@@ -405,8 +401,8 @@ def extract_images_from_docx(
     filter_important: bool = True,
 ) -> List[Dict[str, Any]]:
     """Extract images from DOCX."""
-    logger.info(f"Starting DOCX image extraction from: {file_path}")
-    logger.info(f"Filter important: {filter_important}")
+    logger.debug(f"Starting DOCX image extraction from: {file_path}")
+    logger.debug(f"Filter important: {filter_important}")
     
     doc = Document(file_path)
     doc_name = _base_name_no_ext(file_path)
@@ -417,7 +413,7 @@ def extract_images_from_docx(
     total_images_found = 0
     images_passed_filter = 0
     
-    logger.info(f"Scanning DOCX relationships for images...")
+    logger.debug(f"Scanning DOCX relationships for images...")
     
     for rel_id, rel in doc.part.rels.items():
         if "image" in rel.target_ref:
@@ -465,17 +461,14 @@ def extract_images_from_docx(
                     "bbox": None,
                 })
 
-                logger.info(f"  ✅ Kept image {image_index}: {pil_image.width}x{pil_image.height} (original mode: {original_mode})")
+                logger.debug(f"  ✅ Kept image {image_index}: {pil_image.width}x{pil_image.height} (original mode: {original_mode})")
                 image_index += 1
                 
             except Exception as e:
                 logger.error(f"  ❌ Error extracting image {rel_id}: {e}")
                 continue
     
-    logger.info(f"DOCX extraction complete:")
-    logger.info(f"  - Total images found: {total_images_found}")
-    logger.info(f"  - Images passed filter: {images_passed_filter}")
-    logger.info(f"  - Images filtered out: {total_images_found - images_passed_filter}")
+    logger.info(f"DOCX extraction: {total_images_found} images found, {images_passed_filter} kept")
     
     return images
 
@@ -506,12 +499,12 @@ def extract_text_and_images_metadata(
           "converted_pdf_path": str  # only for PowerPoint files
         }
     """
-    logger.info("="*60)
-    logger.info(f"extract_text_and_images_metadata called")
-    logger.info(f"  file_path: {file_path}")
-    logger.info(f"  extract_images: {extract_images}")
-    logger.info(f"  filter_important: {filter_important}")
-    logger.info("="*60)
+    logger.debug("="*60)
+    logger.debug(f"extract_text_and_images_metadata called")
+    logger.debug(f"  file_path: {file_path}")
+    logger.debug(f"  extract_images: {extract_images}")
+    logger.debug(f"  filter_important: {filter_important}")
+    logger.debug("="*60)
 
     ext = os.path.splitext(file_path)[1].lower()
 
@@ -520,7 +513,7 @@ def extract_text_and_images_metadata(
 
     # Extract images if requested
     if extract_images:
-        logger.info(f"Extracting images for file type: {ext}")
+        logger.debug(f"Extracting images for file type: {ext}")
 
         if ext == ".pdf":
             images = extract_images_from_pdf(file_path, user_id, filter_important)
@@ -532,13 +525,15 @@ def extract_text_and_images_metadata(
             # PowerPoint should be converted to PDF in ingest_common.py before reaching here
             raise ValueError("PowerPoint files should be converted to PDF before image extraction")
         else:
-            logger.info(f"No image extraction for file type: {ext}")
+            logger.debug(f"No image extraction for file type: {ext}")
             result["images"] = []
     else:
-        logger.info("Image extraction disabled")
+        logger.debug("Image extraction disabled")
         result["images"] = []
 
-    logger.info(f"Final result: {len(result.get('text_chunks', []))} text chunks, {len(result.get('images', []))} images")
-    logger.info("="*60)
+    text_count = len(result.get('text_chunks', []))
+    image_count = len(result.get('images', []))
+    if text_count > 0 or image_count > 0:
+        logger.info(f"Extracted {text_count} text chunks, {image_count} images")
 
     return result

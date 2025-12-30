@@ -3,7 +3,7 @@
     <div class="flex justify-between items-center mx-[20%] py-2">
       <!-- Left side -->
       <div class="flex items-center gap-2">
-        
+
         <UButton
           to="/"
           variant="ghost"
@@ -11,6 +11,9 @@
           size="lg"
           class="font-bold text-lg"
         >
+          <template #leading>
+            <img src="/icon.png" alt="SmartQuery" class="w-6 h-6" />
+          </template>
           SmartQuery
         </UButton>
       </div>

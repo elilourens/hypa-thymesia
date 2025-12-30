@@ -3,6 +3,14 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/supabase', '@nuxt/ui',],
   css: ['~/assets/css/main.css'],
 
+  app: {
+    head: {
+      link: [
+        { rel: 'icon', type: 'image/png', href: '/icon.png' }
+      ]
+    }
+  },
+
   nitro: {
     preset: 'cloudflare-pages'
   },

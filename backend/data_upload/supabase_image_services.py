@@ -17,36 +17,49 @@ IMAGE_BUCKET = os.getenv("IMAGE_BUCKET", "images")
 
 
 def upload_image_to_bucket(supabase: Client, file_content: bytes, filename: str, bucket: str = IMAGE_BUCKET) -> Optional[str]:
-    logger.info(f"upload_image_to_bucket called: filename={filename}, size={len(file_content)} bytes, bucket={bucket}")
+    logger.debug(f"upload_image_to_bucket called: filename={filename}, size={len(file_content)} bytes, bucket={bucket}")
 
     ext = os.path.splitext(filename)[1].lower()
-    logger.info(f"File extension: {ext}")
+    logger.debug(f"File extension: {ext}")
 
     if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
         logger.warning(f"Unsupported image extension: {ext}")
         return None
 
     try:
-        logger.info("Opening image with PIL...")
+        logger.debug("Opening image with PIL...")
         img = Image.open(BytesIO(file_content))
-        logger.info(f"Image opened successfully: format={img.format}, size={img.size}")
+        logger.debug(f"Image opened successfully: format={img.format}, size={img.size}")
 
-        logger.info("Verifying image...")
+        logger.debug("Verifying image...")
         img.verify()
-        logger.info("Image verification passed")
+        logger.debug("Image verification passed")
     except Exception as e:
         logger.error(f"Image validation failed: {e}", exc_info=True)
         return None
 
     file_path = f"uploads/{uuid4()}_{filename}"
-    logger.info(f"Uploading to bucket '{bucket}' at path: {file_path}")
+    logger.debug(f"Uploading to bucket '{bucket}' at path: {file_path}")
+
+    # Determine content type from extension
+    content_type_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp"
+    }
+    content_type = content_type_map.get(ext, "image/jpeg")
 
     try:
-        resp = supabase.storage.from_(bucket).upload(file_path, file_content)
-        logger.info(f"Upload response: {resp}")
+        resp = supabase.storage.from_(bucket).upload(
+            file_path,
+            file_content,
+            file_options={"content-type": content_type}
+        )
+        logger.debug(f"Upload response: {resp}")
 
         if resp:
-            logger.info(f"Upload successful, returning path: {file_path}")
+            logger.debug(f"Upload successful, returning path: {file_path}")
             return file_path
         else:
             logger.error("Upload returned empty response")

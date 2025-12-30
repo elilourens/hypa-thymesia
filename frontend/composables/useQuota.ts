@@ -21,6 +21,9 @@ export function useQuota() {
     current_count: number
     max_files: number
     remaining: number
+    over_limit: number
+    is_over_limit: boolean
+    can_upload: boolean
     percentage_used: number
   }
 
@@ -89,7 +92,10 @@ export function useQuota() {
         current_count: errorDetail.current_count,
         max_files: errorDetail.max_files,
         remaining: errorDetail.remaining || 0,
-        percentage_used: (errorDetail.current_count / errorDetail.max_files) * 100
+        over_limit: errorDetail.over_limit || 0,
+        is_over_limit: errorDetail.over_limit > 0,
+        can_upload: errorDetail.current_count < errorDetail.max_files,
+        percentage_used: Math.min(100, (errorDetail.current_count / errorDetail.max_files) * 100)
       }
     }
 

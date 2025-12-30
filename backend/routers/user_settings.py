@@ -12,6 +12,7 @@ from core.security import get_current_user, AuthUser
 from core.user_limits import (
     get_user_file_count,
     get_user_max_files,
+    get_user_quota_status,
     ensure_user_settings_exist,
     DEFAULT_MAX_FILES
 )
@@ -25,7 +26,10 @@ class UserQuotaResponse(BaseModel):
     current_count: int
     max_files: int
     remaining: int
-    percentage_used: float
+    over_limit: int
+    is_over_limit: bool
+    can_upload: bool
+    percentage_used: int
 
 
 class UpdateMaxFilesRequest(BaseModel):
@@ -40,24 +44,18 @@ def get_user_quota(
 ):
     """
     Get the current user's file quota information.
-    Shows how many files they have, their limit, and remaining quota.
+    Shows how many files they have, their limit, remaining quota,
+    and whether they're over their limit (e.g., after downgrading from premium).
     """
     user_id = auth.id
 
     # Ensure settings exist
     ensure_user_settings_exist(supabase, user_id)
 
-    current_count = get_user_file_count(supabase, user_id)
-    max_files = get_user_max_files(supabase, user_id)
-    remaining = max(0, max_files - current_count)
-    percentage_used = (current_count / max_files * 100) if max_files > 0 else 0
+    # Get comprehensive quota status
+    quota = get_user_quota_status(supabase, user_id)
 
-    return UserQuotaResponse(
-        current_count=current_count,
-        max_files=max_files,
-        remaining=remaining,
-        percentage_used=round(percentage_used, 2)
-    )
+    return UserQuotaResponse(**quota)
 
 
 @router.patch("/max-files")

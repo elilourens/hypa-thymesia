@@ -78,7 +78,7 @@ async def ingest_file_content(
         deep_image_embed_dim = 512
         logger.warning("DEEP_IMAGE_EMBED_DIM not a valid integer, using default 512")
     
-    logger.info(f"Using embedding dimensions - text: {text_embed_dim}, image: {image_embed_dim}, deep_image: {deep_image_embed_dim}")
+    logger.debug(f"Using embedding dimensions - text: {text_embed_dim}, image: {image_embed_dim}, deep_image: {deep_image_embed_dim}")
     
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     
@@ -86,11 +86,11 @@ async def ingest_file_content(
         raise ValueError(f"Unsupported file type: {ext or 'unknown'}")
     
     doc_id = doc_id or str(uuid4())
-    logger.info(f"Ingesting file: {filename} (doc_id={doc_id}, ext={ext})")
+    logger.info(f"Ingesting: {filename} (doc_id={doc_id})")
     
     # --- Handle standalone images ---
     if ext in SUPPORTED_IMAGES:
-        logger.info("Processing as standalone image")
+        logger.debug("Processing as standalone image")
         image_vectors = await embed_images([file_content])
 
         # Extract bucket from storage_path if available
@@ -137,7 +137,7 @@ async def ingest_file_content(
         else:
             logger.info(f"Skipping auto-tagging for uploaded image (tagging disabled): doc_id={doc_id}")
 
-        logger.info(f"Image ingestion complete: doc_id={doc_id}")
+        logger.debug(f"Image ingestion complete: doc_id={doc_id}")
         return {
             "doc_id": doc_id,
             "text_chunks_ingested": 0,
@@ -146,13 +146,13 @@ async def ingest_file_content(
         }
     
     # --- Handle text/PDF/docx ---
-    logger.info(f"Processing as document: {ext}")
+    logger.debug(f"Processing as document: {ext}")
 
     # Convert PowerPoint to PDF first
     pdf_storage_path = None
     original_pptx_filename = None
     if ext in ("ppt", "pptx"):
-        logger.info("Converting PowerPoint to PDF")
+        logger.debug("Converting PowerPoint to PDF")
         from ingestion.text.extract_pptx import convert_ppt_to_pdf
         from data_upload.supabase_text_services import upload_text_to_bucket
 
@@ -216,15 +216,15 @@ async def ingest_file_content(
         tmp.write(file_content)
         tmp_path = tmp.name
 
-    logger.info(f"Created temp file: {tmp_path}")
+    logger.debug(f"Created temp file: {tmp_path}")
     
     try:
         # Extract text and optionally images
         should_extract_images = extract_deep_embeds and ext in ("pdf", "docx")
-        logger.info(f"Should extract images: {should_extract_images}")
+        logger.debug(f"Should extract images: {should_extract_images}")
 
         if should_extract_images:
-            logger.info("Extracting text and images")
+            logger.debug("Extracting text and images")
             meta_out = extract_text_and_images_metadata(
                 file_path=tmp_path,
                 user_id=user_id,
@@ -234,7 +234,7 @@ async def ingest_file_content(
                 filter_important=True,
             )
         else:
-            logger.info("Extracting text only")
+            logger.debug("Extracting text only")
             meta_out = extract_text_metadata(tmp_path, user_id=user_id, max_chunk_size=800)
             meta_out["images"] = []
 
@@ -246,7 +246,7 @@ async def ingest_file_content(
     finally:
         try:
             os.unlink(tmp_path)
-            logger.info("Cleaned up temp file")
+            logger.debug("Cleaned up temp file")
         except Exception as e:
             logger.warning(f"Failed to cleanup temp file: {e}")
     
@@ -254,14 +254,14 @@ async def ingest_file_content(
         raise ValueError("No text chunks were extracted from file")
     
     # --- Embed and ingest text chunks ---
-    logger.info("Embedding text chunks")
+    logger.debug("Embedding text chunks")
     texts = [c["chunk_text"] for c in chunks]
     text_vectors = await embed_texts(texts)
-    logger.info(f"Generated {len(text_vectors)} text embeddings")
-    logger.info(f"Text embedding model: {settings.EMBED_MODEL}")
-    logger.info(f"Text embedding dim: {settings.EMBED_DIM}")
+    logger.info(f"Embedded {len(text_vectors)} text chunks")
+    logger.debug(f"Text embedding model: {settings.EMBED_MODEL}")
+    logger.debug(f"Text embedding dim: {settings.EMBED_DIM}")
     if text_vectors:
-        logger.info(f"Actual first vector shape: {len(text_vectors[0])}")
+        logger.debug(f"Actual first vector shape: {len(text_vectors[0])}")
     
     extra_metas = [{
         "page_number": c.get("page_number"),
@@ -272,7 +272,7 @@ async def ingest_file_content(
         "original_filename": original_pptx_filename,  # Add original filename
     } for c in chunks]
     
-    logger.info("Ingesting text chunks to Pinecone")
+    logger.debug("Ingesting text chunks to Pinecone")
     try:
         text_result = ingest_text_chunks(
             supabase,
@@ -291,8 +291,8 @@ async def ingest_file_content(
             size_bytes=len(file_content),
             group_id=group_id,
         )
-        logger.info(f"Text result type: {type(text_result)}")
-        logger.info(f"Text result: {text_result}")
+        logger.debug(f"Text result type: {type(text_result)}")
+        logger.debug(f"Text result: {text_result}")
     except Exception as e:
         logger.error(f"CRITICAL ERROR in ingest_text_chunks: {e}", exc_info=True)
         raise
@@ -310,20 +310,20 @@ async def ingest_file_content(
     if metadata_updates:
         try:
             supabase.table("app_chunks").update(metadata_updates).eq("doc_id", doc_id).execute()
-            logger.info(f"Updated chunks with combined metadata: {list(metadata_updates.keys())}")
+            logger.debug(f"Updated chunks with combined metadata: {list(metadata_updates.keys())}")
         except Exception as e:
             logger.warning(f"Could not update metadata: {e}")
     
     # --- Embed and ingest extracted images ---
     images_result = None
     if images_data:
-        logger.info(f"Starting image embedding for {len(images_data)} images")
+        logger.debug(f"Starting image embedding for {len(images_data)} images")
         try:
             image_bytes_list = [img["image_bytes"] for img in images_data]
             image_vectors = await embed_images(image_bytes_list)
-            logger.info(f"Generated {len(image_vectors)} image embeddings")
+            logger.info(f"Embedded {len(image_vectors)} extracted images")
 
-            logger.info("Ingesting deep embed images")
+            logger.debug("Ingesting deep embed images")
             # Extract parent bucket from storage_metadata if available
             parent_bucket = storage_metadata.get("bucket") if storage_metadata else None
 
@@ -342,7 +342,7 @@ async def ingest_file_content(
                 embedding_version=1,
                 group_id=group_id,
             )
-            logger.info(f"Image ingestion complete: {images_result}")
+            logger.debug(f"Image ingestion complete: {images_result}")
 
             # NOTE: Auto-tagging disabled for images extracted from documents (PDFs/DOCX)
             # Only directly uploaded images are auto-tagged
@@ -352,21 +352,21 @@ async def ingest_file_content(
             logger.error(f"Error during image ingestion: {e}", exc_info=True)
             logger.warning("Continuing despite image ingestion failure")
     else:
-        logger.info("No images to ingest")
+        logger.debug("No images to ingest")
     
-    logger.info(f"File ingestion complete: doc_id={doc_id}")
+    logger.info(f"Ingestion complete: doc_id={doc_id}")
     
     # Safely extract vector count
     try:
         text_chunks_count = text_result.get("vector_count", 0) if isinstance(text_result, dict) else 0
-        logger.info(f"Extracted text_chunks_count: {text_chunks_count}")
+        logger.debug(f"Extracted text_chunks_count: {text_chunks_count}")
     except Exception as e:
         logger.error(f"Error extracting vector_count: {e}")
         text_chunks_count = 0
     
     try:
         images_extracted = images_result.get("images_ingested", 0) if images_result and isinstance(images_result, dict) else 0
-        logger.info(f"Extracted images_extracted: {images_extracted}")
+        logger.debug(f"Extracted images_extracted: {images_extracted}")
     except Exception as e:
         logger.error(f"Error extracting images_ingested: {e}")
         images_extracted = 0
@@ -375,7 +375,7 @@ async def ingest_file_content(
     # Tag the document after text ingestion completes
     # Pass the text chunks directly to avoid querying Pinecone
     if enable_tagging:
-        logger.info(f"Scheduling document tagging for doc_id={doc_id}")
+        logger.debug(f"Scheduling document tagging for doc_id={doc_id}")
         try:
             asyncio.create_task(
                 tag_document_after_ingest(
@@ -385,7 +385,7 @@ async def ingest_file_content(
                     text_chunks=texts  # Pass extracted text directly
                 )
             )
-            logger.info("Document tagging task scheduled successfully")
+            logger.debug("Document tagging task scheduled successfully")
         except Exception as e:
             logger.warning(f"Failed to schedule document tagging task: {e}")
     else:
@@ -397,5 +397,5 @@ async def ingest_file_content(
         "images_extracted": int(images_extracted),
         "storage_type": "reference" if storage_metadata else "uploaded",
     }
-    logger.info(f"Returning response: {response}")
+    logger.debug(f"Returning response: {response}")
     return response

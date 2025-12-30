@@ -37,7 +37,7 @@ async def ingest_text_and_image_files(
 
     content = await file.read()
 
-    logger.info(f"Upload started: {file.filename}, size: {len(content)} bytes, extract_deep_embeds: {extract_deep_embeds}")
+    logger.debug(f"Upload started: {file.filename}, size: {len(content)} bytes, extract_deep_embeds: {extract_deep_embeds}")
 
     # --- Upload file to storage ---
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
@@ -57,7 +57,7 @@ async def ingest_text_and_image_files(
         if not storage_path:
             raise HTTPException(500, detail="Failed to upload file to storage")
         
-        logger.info(f"Uploaded to storage: {storage_path}")
+        logger.debug(f"Uploaded to storage: {storage_path}")
     except HTTPException:
         raise
     except Exception as e:
@@ -78,7 +78,7 @@ async def ingest_text_and_image_files(
             group_id=group_id,
             enable_tagging=enable_tagging,
         )
-        logger.info(f"File ingestion complete: {result}")
+        logger.debug(f"File ingestion complete: {result}")
         return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
