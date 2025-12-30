@@ -19,6 +19,7 @@ async def ingest_text_and_image_files(
     file: UploadFile = File(...),
     group_id: Optional[str] = Form(None),
     extract_deep_embeds: bool = Form(True),
+    enable_tagging: bool = Form(True),
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
     settings = Depends(get_settings),
@@ -75,6 +76,7 @@ async def ingest_text_and_image_files(
             storage_path=storage_path,
             extract_deep_embeds=extract_deep_embeds,
             group_id=group_id,
+            enable_tagging=enable_tagging,
         )
         logger.info(f"File ingestion complete: {result}")
         return result

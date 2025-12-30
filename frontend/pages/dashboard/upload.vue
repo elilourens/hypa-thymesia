@@ -23,6 +23,9 @@ const groupMode = ref<'none' | 'existing' | 'create'>('none')
 const selectedGroupId = ref<string | null>(null)
 const newGroupName = ref('')
 
+// Tagging option
+const enableTagging = ref(true)
+
 // Enable upload only when conditions are met
 const canUpload = computed(() => {
   if (!files.value.length || uploading.value) return false
@@ -68,7 +71,7 @@ async function doUpload(): Promise<void> {
   try {
     uploading.value = true
     const results = await Promise.allSettled(
-      files.value.map(f => uploadFile(f, groupId))
+      files.value.map(f => uploadFile(f, groupId, enableTagging.value))
     )
     const ok = results.filter(r => r.status === 'fulfilled').length
     const failed = results.length - ok
@@ -123,6 +126,9 @@ async function doUpload(): Promise<void> {
 
       <!-- Right side: Groups and Upload -->
       <div class="flex-1 space-y-3">
+          <!-- Tagging toggle -->
+          <USwitch v-model="enableTagging" label="Enable auto-tagging" />
+
           <label class="block text-sm font-medium">Attach to a group</label>
 
           <!-- Mode switch -->

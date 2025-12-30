@@ -16,12 +16,13 @@ export function useIngest() {
 
   // --- Upload ---
 
-  async function uploadFile(file: File, groupId?: string) {
+  async function uploadFile(file: File, groupId?: string, enableTagging: boolean = true) {
     try {
       const headers = await authHeaders()
       const fd = new FormData()
       fd.append('file', file)
       if (groupId) fd.append('group_id', groupId)
+      fd.append('enable_tagging', enableTagging.toString())
 
       await $fetch(`${API_BASE}/ingest/upload-text-and-images`, {
         method: 'POST',

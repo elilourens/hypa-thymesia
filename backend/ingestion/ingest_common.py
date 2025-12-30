@@ -37,10 +37,11 @@ async def ingest_file_content(
     group_id: Optional[str] = None,
     storage_metadata: Optional[Dict[str, Any]] = None,
     doc_id: Optional[str] = None,
+    enable_tagging: bool = True,
 ) -> Dict[str, Any]:
     """
     Common ingestion logic for file content (text or image).
-    
+
     Args:
         file_content: Raw file bytes
         filename: Original filename
@@ -53,7 +54,8 @@ async def ingest_file_content(
         group_id: Optional group ID for organization
         storage_metadata: Optional dict with storage provider info
         doc_id: Optional doc_id to use (generated if not provided)
-    
+        enable_tagging: Whether to enable automatic tagging of uploaded content
+
     Returns:
         Dict with ingestion results
     """
@@ -115,22 +117,25 @@ async def ingest_file_content(
         )
 
         # Trigger auto-tagging in the background for all uploaded images (including Google Drive)
-        logger.info(f"Scheduling auto-tagging for uploaded image: doc_id={doc_id}, chunk_id={result['chunk_id']}")
-        try:
-            from tagging.background_tasks import tag_image_background
-            # Schedule tagging without blocking the response, passing chunk_id directly
-            asyncio.create_task(
-                tag_image_background(
-                    chunk_id=result["chunk_id"],
-                    user_id=user_id,
-                    doc_id=doc_id,
-                    image_embedding=image_vectors[0],
-                    storage_path=result["storage_path"],
-                    bucket=result["bucket"]
+        if enable_tagging:
+            logger.info(f"Scheduling auto-tagging for uploaded image: doc_id={doc_id}, chunk_id={result['chunk_id']}")
+            try:
+                from tagging.background_tasks import tag_image_background
+                # Schedule tagging without blocking the response, passing chunk_id directly
+                asyncio.create_task(
+                    tag_image_background(
+                        chunk_id=result["chunk_id"],
+                        user_id=user_id,
+                        doc_id=doc_id,
+                        image_embedding=image_vectors[0],
+                        storage_path=result["storage_path"],
+                        bucket=result["bucket"]
+                    )
                 )
-            )
-        except Exception as e:
-            logger.warning(f"Failed to schedule tagging task: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to schedule tagging task: {e}")
+        else:
+            logger.info(f"Skipping auto-tagging for uploaded image (tagging disabled): doc_id={doc_id}")
 
         logger.info(f"Image ingestion complete: doc_id={doc_id}")
         return {
@@ -369,19 +374,22 @@ async def ingest_file_content(
     # --- Trigger document tagging in the background ---
     # Tag the document after text ingestion completes
     # Pass the text chunks directly to avoid querying Pinecone
-    logger.info(f"Scheduling document tagging for doc_id={doc_id}")
-    try:
-        asyncio.create_task(
-            tag_document_after_ingest(
-                doc_id=doc_id,
-                user_id=user_id,
-                filename=filename,
-                text_chunks=texts  # Pass extracted text directly
+    if enable_tagging:
+        logger.info(f"Scheduling document tagging for doc_id={doc_id}")
+        try:
+            asyncio.create_task(
+                tag_document_after_ingest(
+                    doc_id=doc_id,
+                    user_id=user_id,
+                    filename=filename,
+                    text_chunks=texts  # Pass extracted text directly
+                )
             )
-        )
-        logger.info("Document tagging task scheduled successfully")
-    except Exception as e:
-        logger.warning(f"Failed to schedule document tagging task: {e}")
+            logger.info("Document tagging task scheduled successfully")
+        except Exception as e:
+            logger.warning(f"Failed to schedule document tagging task: {e}")
+    else:
+        logger.info(f"Skipping document tagging (tagging disabled): doc_id={doc_id}")
 
     response = {
         "doc_id": str(doc_id),

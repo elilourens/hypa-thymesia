@@ -387,9 +387,9 @@ function getRowId(row: FileItem) { return row.doc_id }
       <!-- Refresh + total -->
       <div class="flex justify-between items-center px-4">
         <UButton
-          color="neutral"
+          color="primary"
           icon="i-lucide-refresh-ccw"
-          variant="ghost"
+          variant="outline"
           @click="fetchFiles"
         >
           Refresh Table
