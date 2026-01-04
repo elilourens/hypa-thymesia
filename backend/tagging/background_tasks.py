@@ -1,5 +1,5 @@
 """
-Background task utilities for async image and document tagging.
+Background task utilities for async image and document tagging, and chunk formatting.
 """
 
 import asyncio
@@ -294,6 +294,62 @@ async def tag_document_after_ingest(
 
     except Exception as e:
         logger.error(f"Error in post-upload document tagging for doc_id={doc_id}: {e}", exc_info=True)
+
+
+async def format_document_chunks_after_ingest(
+    doc_id: str,
+    user_id: str,
+    max_chunks: int = 100
+) -> None:
+    """
+    Format all text chunks for a document after ingestion completes.
+
+    This runs in the background using Ollama to improve chunk readability
+    without changing semantic meaning.
+
+    Args:
+        doc_id: Document ID
+        user_id: User ID
+        max_chunks: Maximum chunks to format in this batch (default: 100)
+    """
+    try:
+        logger.info(f"Starting background chunk formatting for doc_id={doc_id}")
+
+        # Import here to avoid circular dependencies
+        from formatting.batch_formatter import BatchChunkFormatter
+        from core.deps import get_pinecone
+
+        # Get dependencies
+        supabase = get_supabase()
+        pinecone = get_pinecone()
+
+        # Create formatter
+        formatter = BatchChunkFormatter(
+            supabase=supabase,
+            pinecone_client=pinecone
+        )
+
+        # Format chunks
+        result = await formatter.format_document_chunks(
+            doc_id=doc_id,
+            user_id=user_id,
+            max_chunks=max_chunks
+        )
+
+        logger.info(
+            f"Chunk formatting complete for doc_id={doc_id}: "
+            f"{result['formatted']} formatted, {result['failed']} failed, "
+            f"{result['skipped']} skipped (total: {result['total_chunks']})"
+        )
+
+        if result["errors"]:
+            logger.warning(f"Formatting errors: {result['errors'][:5]}")  # Log first 5 errors
+
+    except Exception as e:
+        logger.error(
+            f"Error in background chunk formatting for doc_id={doc_id}: {e}",
+            exc_info=True
+        )
 
 
 def schedule_tagging_task(coro):

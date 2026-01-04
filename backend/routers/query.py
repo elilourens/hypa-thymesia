@@ -115,6 +115,15 @@ async def query_endpoint(
     for m in result_matches or []:
         md = m.get("metadata") if isinstance(m, dict) else getattr(m, "metadata", {}) or {}
 
+        # Keep both original and formatted text available
+        if "formatted_text" in md and md["formatted_text"]:
+            md["original_text"] = md["text"]
+            md["is_formatted"] = True
+        else:
+            md["is_formatted"] = False
+            md["original_text"] = None
+            md["formatted_text"] = None
+
         # keep only bucket & path for later use by /storage/signed-url
         bucket = md.get("bucket")
         storage_path = md.get("storage_path")

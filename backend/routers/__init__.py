@@ -13,5 +13,6 @@ from .addFromOneDrive import router as add_from_onedrive_router
 from .tagging import router as tagging_router
 from .user_settings import router as user_settings_router
 from .stripe_payments import router as stripe_router
+from .formatting import router as formatting_router
 
-all_routers = [health_router, upload_router, delete_router, query_router, files_router, groups_router, chat_router, storage_router, gdrive_router, add_from_gdrive_router, onedrive_router, add_from_onedrive_router, tagging_router, user_settings_router, stripe_router]
+all_routers = [health_router, upload_router, delete_router, query_router, files_router, groups_router, chat_router, storage_router, gdrive_router, add_from_gdrive_router, onedrive_router, add_from_onedrive_router, tagging_router, user_settings_router, stripe_router, formatting_router]

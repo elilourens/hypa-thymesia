@@ -1,10 +1,49 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { watch, ref } from 'vue'
+import { marked } from 'marked'
 import { useFilesApi } from '~/composables/useFiles'
 const { getSignedUrl, getThumbnailUrl } = useFilesApi()
 const toast = useToast()
 
 const props = defineProps<{ results: any[], deleting?: boolean }>()
+
+// Track which results are showing formatted text (by result id)
+const showFormatted = ref<Record<string, boolean>>({})
+
+// Configure marked for safe rendering
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+})
+
+// Render markdown text to HTML
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  return marked(text) as string
+}
+
+// Toggle between formatted and original text
+function toggleTextDisplay(resultId: string) {
+  showFormatted.value[resultId] = !showFormatted.value[resultId]
+}
+
+// Get the text to display based on toggle state
+function getDisplayText(r: any): string {
+  const hasFormatted = r.metadata?.is_formatted && r.metadata?.formatted_text
+
+  // If no formatted text available, always show original
+  if (!hasFormatted) {
+    return r.metadata?.text || ''
+  }
+
+  // If showing formatted (default), return formatted_text
+  if (showFormatted.value[r.id] !== false) {
+    return r.metadata?.formatted_text || r.metadata?.text || ''
+  }
+
+  // Otherwise show original
+  return r.metadata?.original_text || r.metadata?.text || ''
+}
 
 // ========== Utility Functions ==========
 
@@ -223,7 +262,27 @@ watch(
 
         <!-- Render text hits -->
         <div v-if="(r.metadata?.modality || '').toLowerCase() === 'text'">
-          <p class="whitespace-pre-line">{{ r.metadata?.text }}</p>
+          <!-- Toggle button for formatted/original text (only show if formatted text exists) -->
+          <div v-if="r.metadata?.is_formatted" class="mb-2 flex items-center gap-2">
+            <UButton
+              size="xs"
+              :color="showFormatted[r.id] !== false ? 'primary' : 'neutral'"
+              variant="soft"
+              icon="i-heroicons-sparkles"
+              @click="toggleTextDisplay(r.id)"
+            >
+              {{ showFormatted[r.id] !== false ? 'Formatted' : 'Original' }}
+            </UButton>
+            <span class="text-xs text-gray-500">
+              {{ showFormatted[r.id] !== false ? 'Showing formatted text' : 'Showing original text' }}
+            </span>
+          </div>
+
+          <!-- Render markdown if available, otherwise show plain text -->
+          <div
+            v-html="renderMarkdown(getDisplayText(r))"
+            class="prose prose-sm max-w-none dark:prose-invert prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0"
+          ></div>
 
           <!-- Display document tags if available -->
           <div v-if="r.metadata?.tags && r.metadata.tags.length > 0" class="mt-3 space-y-2">

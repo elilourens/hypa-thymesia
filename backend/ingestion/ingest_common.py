@@ -391,6 +391,22 @@ async def ingest_file_content(
     else:
         logger.info(f"Skipping document tagging (tagging disabled): doc_id={doc_id}")
 
+    # --- Trigger chunk formatting in the background ---
+    # Format text chunks to improve readability after ingestion completes
+    logger.debug(f"Scheduling chunk formatting for doc_id={doc_id}")
+    try:
+        from tagging.background_tasks import format_document_chunks_after_ingest
+        asyncio.create_task(
+            format_document_chunks_after_ingest(
+                doc_id=doc_id,
+                user_id=user_id,
+                max_chunks=100  # Format up to 100 chunks per document
+            )
+        )
+        logger.debug("Chunk formatting task scheduled successfully")
+    except Exception as e:
+        logger.warning(f"Failed to schedule chunk formatting task: {e}")
+
     response = {
         "doc_id": str(doc_id),
         "text_chunks_ingested": int(text_chunks_count),
