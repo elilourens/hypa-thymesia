@@ -133,23 +133,37 @@ class BatchChunkFormatter:
             max_concurrent = int(os.getenv("OLLAMA_NUM_PARALLEL", "10"))
             formatted_results = await self._format_chunks_with_ollama(pinecone_data, max_concurrent=max_concurrent)
 
-            # 6. Update Pinecone metadata with formatted text
-            for chunk_id, formatted_text in formatted_results["formatted"]:
+            # 6. Batch update Pinecone metadata with formatted text
+            if formatted_results["formatted"]:
                 try:
-                    self._update_pinecone_metadata(chunk_id, user_id, formatted_text)
-                    self._mark_chunk_formatted(chunk_id)
-                    results["formatted"] += 1
-                except Exception as e:
-                    logger.error(f"Failed to update chunk {chunk_id}: {e}")
-                    self._mark_chunk_failed(chunk_id, str(e))
-                    results["failed"] += 1
-                    results["errors"].append(f"Chunk {chunk_id}: {str(e)}")
+                    formatted_chunk_ids = [cid for cid, _ in formatted_results["formatted"]]
+                    formatted_texts = {cid: txt for cid, txt in formatted_results["formatted"]}
 
-            # 7. Mark failed chunks
-            for chunk_id, error in formatted_results["failed"]:
-                self._mark_chunk_failed(chunk_id, error)
-                results["failed"] += 1
-                results["errors"].append(f"Chunk {chunk_id}: {error}")
+                    self._batch_update_pinecone_metadata(formatted_chunk_ids, user_id, formatted_texts)
+                    self._batch_mark_chunks_formatted(formatted_chunk_ids)
+
+                    results["formatted"] = len(formatted_chunk_ids)
+                    logger.info(f"Successfully updated {len(formatted_chunk_ids)} chunks in Pinecone")
+                except Exception as e:
+                    logger.error(f"Failed to batch update Pinecone: {e}", exc_info=True)
+                    # Fall back to individual updates if batch fails
+                    for chunk_id, formatted_text in formatted_results["formatted"]:
+                        try:
+                            self._update_pinecone_metadata(chunk_id, user_id, formatted_text)
+                            self._mark_chunk_formatted(chunk_id)
+                            results["formatted"] += 1
+                        except Exception as e:
+                            logger.error(f"Failed to update chunk {chunk_id}: {e}")
+                            results["failed"] += 1
+                            results["errors"].append(f"Chunk {chunk_id}: {str(e)}")
+
+            # 7. Batch mark failed chunks
+            if formatted_results["failed"]:
+                failed_chunk_data = {cid: err for cid, err in formatted_results["failed"]}
+                self._batch_mark_chunks_failed(failed_chunk_data)
+                results["failed"] = len(formatted_results["failed"])
+                for chunk_id, error in formatted_results["failed"]:
+                    results["errors"].append(f"Chunk {chunk_id}: {error}")
 
             logger.info(
                 f"Batch formatting complete: {results['formatted']} formatted, "
@@ -255,6 +269,75 @@ class BatchChunkFormatter:
 
         return {"formatted": formatted, "failed": failed}
 
+    def _batch_update_pinecone_metadata(
+        self,
+        chunk_ids: list[str],
+        user_id: str,
+        formatted_texts: dict[str, str]
+    ):
+        """Batch update Pinecone vector metadata with formatted text."""
+        try:
+            # Get vector_ids from registry
+            vectors_response = self.supabase.table("app_vector_registry").select(
+                "chunk_id, vector_id"
+            ).in_("chunk_id", chunk_ids).execute()
+
+            if not vectors_response.data:
+                raise ValueError("No vector_ids found for chunks")
+
+            vector_id_map = {v["chunk_id"]: v["vector_id"] for v in vectors_response.data}
+
+            # Fetch all vectors at once
+            vector_ids = list(vector_id_map.values())
+            fetch_response = self.text_index.fetch(ids=vector_ids, namespace=user_id)
+            vectors_dict = self._get_value(fetch_response, 'vectors', {})
+
+            if not vectors_dict:
+                raise ValueError("No vectors found in Pinecone")
+
+            # Prepare batch update
+            formatted_at = datetime.now(timezone.utc).isoformat()
+            vectors_to_upsert = []
+
+            for chunk_id in chunk_ids:
+                vector_id = vector_id_map.get(chunk_id)
+                if not vector_id:
+                    logger.warning(f"No vector_id found for chunk {chunk_id}")
+                    continue
+
+                vector_obj = vectors_dict.get(vector_id)
+                if not vector_obj:
+                    logger.warning(f"Vector not found for vector_id {vector_id}")
+                    continue
+
+                current_metadata = self._get_value(vector_obj, "metadata", {})
+                values = self._get_value(vector_obj, "values", [])
+
+                updated_metadata = {
+                    **current_metadata,
+                    "formatted_text": formatted_texts[chunk_id],
+                    "formatted_at": formatted_at
+                }
+
+                vectors_to_upsert.append({
+                    "id": vector_id,
+                    "values": values,
+                    "metadata": updated_metadata
+                })
+
+            # Batch upsert to Pinecone (up to 1000 vectors per request)
+            batch_size = 1000
+            for i in range(0, len(vectors_to_upsert), batch_size):
+                batch = vectors_to_upsert[i:i + batch_size]
+                self.text_index.upsert(vectors=batch, namespace=user_id)
+                logger.debug(f"Updated batch of {len(batch)} vectors in Pinecone")
+
+            logger.info(f"Batch updated {len(vectors_to_upsert)} vectors in Pinecone")
+
+        except Exception as e:
+            logger.error(f"Failed to batch update Pinecone metadata: {e}", exc_info=True)
+            raise
+
     def _update_pinecone_metadata(self, chunk_id: str, user_id: str, formatted_text: str):
         """Update Pinecone vector metadata with formatted text."""
         try:
@@ -301,12 +384,44 @@ class BatchChunkFormatter:
     def _update_chunk_status(self, chunk_ids: list[str], status: str):
         """Update formatting status for multiple chunks."""
         try:
-            for chunk_id in chunk_ids:
-                self.supabase.table("app_chunks").update({
-                    "formatting_status": status
-                }).eq("chunk_id", chunk_id).execute()
+            # Batch update using Supabase's IN filter
+            self.supabase.table("app_chunks").update({
+                "formatting_status": status
+            }).in_("chunk_id", chunk_ids).execute()
+            logger.debug(f"Updated status to '{status}' for {len(chunk_ids)} chunks")
         except Exception as e:
             logger.error(f"Failed to update chunk status: {e}", exc_info=True)
+
+    def _batch_mark_chunks_formatted(self, chunk_ids: list[str]):
+        """Batch mark chunks as successfully formatted."""
+        try:
+            formatted_at = datetime.now(timezone.utc).isoformat()
+            self.supabase.table("app_chunks").update({
+                "formatting_status": "formatted",
+                "formatted_at": formatted_at,
+                "formatting_error": None
+            }).in_("chunk_id", chunk_ids).execute()
+            logger.debug(f"Marked {len(chunk_ids)} chunks as formatted")
+        except Exception as e:
+            logger.error(f"Failed to batch mark chunks as formatted: {e}", exc_info=True)
+            # Fall back to individual updates
+            for chunk_id in chunk_ids:
+                self._mark_chunk_formatted(chunk_id)
+
+    def _batch_mark_chunks_failed(self, failed_chunks: dict[str, str]):
+        """Batch mark chunks as failed formatting.
+
+        Args:
+            failed_chunks: Dict mapping chunk_id to error message
+        """
+        try:
+            # PostgreSQL/Supabase doesn't support different values per row in a simple update,
+            # so we need to do individual updates for failed chunks (they have different errors)
+            for chunk_id, error in failed_chunks.items():
+                self._mark_chunk_failed(chunk_id, error)
+            logger.debug(f"Marked {len(failed_chunks)} chunks as failed")
+        except Exception as e:
+            logger.error(f"Failed to batch mark chunks as failed: {e}", exc_info=True)
 
     def _mark_chunk_formatted(self, chunk_id: str):
         """Mark chunk as successfully formatted."""

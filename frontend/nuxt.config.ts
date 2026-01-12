@@ -25,7 +25,8 @@ export default defineNuxtConfig({
         '/signup',
         '/reset-password',
         '/confirm',        // callback itself
-        '/auth/**'         // if you have any auth-prefixed routes
+        '/auth/**',        // if you have any auth-prefixed routes
+        '/privacy'         // privacy policy page
       ]
     }
   }

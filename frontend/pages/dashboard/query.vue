@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { RadioGroupItem } from '@nuxt/ui'
 import { useIngest } from '@/composables/useIngest'
 import { NO_GROUP_VALUE } from '@/composables/useGroups'
@@ -90,14 +90,18 @@ async function loadUserTags() {
   }
 }
 
-// Load tags on mount
-onMounted(() => {
-  loadUserTags()
-})
-
 // Reload tags when switching between document/image mode
 watch(tagSearchMode, () => {
-  loadUserTags()
+  if (queryRoute.value === 'tags') {
+    loadUserTags()
+  }
+})
+
+// Load tags when switching to tags route
+watch(queryRoute, (newRoute) => {
+  if (newRoute === 'tags' && Object.keys(userTagCategories.value).length === 0) {
+    loadUserTags()
+  }
 })
 
 // ---- Actions ----

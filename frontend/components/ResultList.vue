@@ -24,7 +24,30 @@ function renderMarkdown(text: string): string {
 
 // Toggle between formatted and original text
 function toggleTextDisplay(resultId: string) {
-  showFormatted.value[resultId] = !showFormatted.value[resultId]
+  // If undefined, it was showing formatted (default), so toggle to false
+  if (showFormatted.value[resultId] === undefined) {
+    showFormatted.value[resultId] = false
+  } else {
+    showFormatted.value[resultId] = !showFormatted.value[resultId]
+  }
+}
+
+// Check if a result is currently showing formatted text
+function isShowingFormatted(r: any): boolean {
+  const hasFormatted = r.metadata?.is_formatted && r.metadata?.formatted_text
+
+  // If no formatted text available, we're not showing formatted
+  if (!hasFormatted) {
+    return false
+  }
+
+  // If state is explicitly set, use that
+  if (showFormatted.value[r.id] !== undefined) {
+    return showFormatted.value[r.id] === true
+  }
+
+  // Default: show formatted if it exists
+  return true
 }
 
 // Get the text to display based on toggle state
@@ -37,7 +60,7 @@ function getDisplayText(r: any): string {
   }
 
   // If showing formatted (default), return formatted_text
-  if (showFormatted.value[r.id] !== false) {
+  if (isShowingFormatted(r)) {
     return r.metadata?.formatted_text || r.metadata?.text || ''
   }
 
@@ -153,6 +176,10 @@ async function handleOpenParentDoc(r: any) {
 
 // ========== Auto Fetch Thumbnail URLs for Images and PDFs ==========
 
+// Cache to prevent duplicate fetches (key: bucket+path)
+const urlCache = ref<Map<string, string>>(new Map())
+const pendingFetches = ref<Set<string>>(new Set())
+
 // whenever results change, populate missing thumbnail URLs
 watch(
   () => props.results,
@@ -163,29 +190,62 @@ watch(
 
       // For images, fetch thumbnail URL
       if (modality === 'image' && !r.metadata?.signed_url) {
+        const cacheKey = `${r.metadata.bucket}:${r.metadata.storage_path}`
+
+        // Check cache first
+        if (urlCache.value.has(cacheKey)) {
+          r.metadata.signed_url = urlCache.value.get(cacheKey)
+          continue
+        }
+
+        // Skip if already fetching
+        if (pendingFetches.value.has(cacheKey)) continue
+
         try {
+          pendingFetches.value.add(cacheKey)
           const url = await getThumbnailUrl(
             r.metadata.bucket,
             r.metadata.storage_path
           )
-          if (url) r.metadata.signed_url = url
+          if (url) {
+            r.metadata.signed_url = url
+            urlCache.value.set(cacheKey, url)
+          }
         } catch (err) {
           console.error('Failed to get thumbnail URL for', r.metadata.storage_path, err)
+        } finally {
+          pendingFetches.value.delete(cacheKey)
         }
       }
 
       // For text results with PDFs (including converted PowerPoint), fetch signed URL for preview
       if (modality === 'text' && (r.metadata?.mime_type || '').includes('application/pdf') && !r.metadata?.signed_url) {
-        try {
-          // Use converted PDF path if available (for PowerPoint files)
-          const bucket = r.metadata.converted_pdf_path ? 'texts' : r.metadata.bucket
-          const storagePath = r.metadata.converted_pdf_path || r.metadata.storage_path
+        // Use converted PDF path if available (for PowerPoint files)
+        const bucket = r.metadata.converted_pdf_path ? 'texts' : r.metadata.bucket
+        const storagePath = r.metadata.converted_pdf_path || r.metadata.storage_path
+        const cacheKey = `${bucket}:${storagePath}`
 
+        // Check cache first
+        if (urlCache.value.has(cacheKey)) {
+          r.metadata.signed_url = urlCache.value.get(cacheKey)
+          continue
+        }
+
+        // Skip if already fetching
+        if (pendingFetches.value.has(cacheKey)) continue
+
+        try {
+          pendingFetches.value.add(cacheKey)
           // Pass download=false to display inline in iframe
           const url = await getSignedUrl(bucket, storagePath, false)
-          if (url) r.metadata.signed_url = url
+          if (url) {
+            r.metadata.signed_url = url
+            urlCache.value.set(cacheKey, url)
+          }
         } catch (err) {
           console.error('Failed to get signed URL for PDF', r.metadata.storage_path, err)
+        } finally {
+          pendingFetches.value.delete(cacheKey)
         }
       }
     }
@@ -197,7 +257,7 @@ watch(
 <template>
   <div
     v-if="results?.length"
-    class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-4"
+    class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4"
   >
     <UCard
       v-for="r in results"
@@ -263,18 +323,18 @@ watch(
         <!-- Render text hits -->
         <div v-if="(r.metadata?.modality || '').toLowerCase() === 'text'">
           <!-- Toggle button for formatted/original text (only show if formatted text exists) -->
-          <div v-if="r.metadata?.is_formatted" class="mb-2 flex items-center gap-2">
+          <div v-if="r.metadata?.is_formatted && r.metadata?.formatted_text" class="mb-2 flex items-center gap-2">
             <UButton
               size="xs"
-              :color="showFormatted[r.id] !== false ? 'primary' : 'neutral'"
+              :color="isShowingFormatted(r) ? 'primary' : 'neutral'"
               variant="soft"
               icon="i-heroicons-sparkles"
               @click="toggleTextDisplay(r.id)"
             >
-              {{ showFormatted[r.id] !== false ? 'Formatted' : 'Original' }}
+              {{ isShowingFormatted(r) ? 'Formatted' : 'Original' }}
             </UButton>
             <span class="text-xs text-gray-500">
-              {{ showFormatted[r.id] !== false ? 'Showing formatted text' : 'Showing original text' }}
+              {{ isShowingFormatted(r) ? 'Showing formatted text' : 'Showing original text' }}
             </span>
           </div>
 

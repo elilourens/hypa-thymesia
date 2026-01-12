@@ -28,3 +28,11 @@ logs
 .env
 .env.*
 !.env.example
+
+# Video query subdirectory ignores
+hypa-thymesia-video-query/__pycache__/
+hypa-thymesia-video-query/.venv/
+hypa-thymesia-video-query/chroma_db/
+hypa-thymesia-video-query/frame_output/
+hypa-thymesia-video-query/.cache/
+hypa-thymesia-video-query/desktop.ini
