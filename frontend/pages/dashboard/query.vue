@@ -7,9 +7,9 @@ import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue';
 import ResultList from '@/components/ResultList.vue'
 
-const { queryText, queryByTags, queryImagesByTags, getUserTags } = useIngest()
+const { queryText, queryVideo, queryByTags, queryImagesByTags, getUserTags } = useIngest()
 
-const queryRoute = ref<'text'|'image'|'extracted_image'|'tags'>('text') // UPDATED
+const queryRoute = ref<'text'|'image'|'extracted_image'|'video'|'tags'>('text') // UPDATED
 const queryTextInput = ref('')
 const loading = ref(false)
 const error = ref<string|null>(null)
@@ -28,12 +28,16 @@ const selectedCategory = ref<string | undefined>(undefined)
 const userTagCategories = ref<Record<string, string[]>>({})
 const loadingTags = ref(false)
 
+// Video search sub-route
+const videoRoute = ref<'video_frames'|'video_transcript'|'video_combined'>('video_frames')
+
 // Radio items for route selection - UPDATED
 const routeItems: RadioGroupItem[] = [
   { value: 'text', label: 'Text' },
   { value: 'image', label: 'Uploaded Images' },
   { value: 'extracted_image', label: 'Document Images' },
-  { value: 'tags', label: 'By Tags' } // NEW
+  { value: 'video', label: 'Videos' }, // NEW
+  { value: 'tags', label: 'By Tags' }
 ]
 
 // Category options for dropdown
@@ -190,6 +194,22 @@ async function run() {
         })
       }
     }
+    // Video search
+    else if (queryRoute.value === 'video') {
+      if (!queryTextInput.value.trim()) {
+        error.value = 'Enter a query'
+        return
+      }
+
+      const r = await queryVideo({
+        query: queryTextInput.value,
+        route: videoRoute.value,
+        top_k: 10,
+        group_id
+      })
+
+      results.value = r.matches || []
+    }
     // Text/image search
     else {
       if (!queryTextInput.value.trim()) {
@@ -197,7 +217,7 @@ async function run() {
         return
       }
 
-      // Type assertion: we know it's not 'tags' here due to the if block above
+      // Type assertion: we know it's not 'tags' or 'video' here due to the if blocks above
       const route = queryRoute.value as 'text' | 'image' | 'extracted_image'
 
       const r = await queryText({
@@ -231,12 +251,34 @@ async function run() {
         :items="routeItems"
       />
 
-      <!-- Text/Image search bar -->
+      <!-- Video sub-route selection -->
+      <div v-if="queryRoute === 'video'" class="flex gap-2">
+        <UButton
+          :variant="videoRoute === 'video_frames' ? 'solid' : 'outline'"
+          @click="videoRoute = 'video_frames'"
+        >
+          Visual
+        </UButton>
+        <UButton
+          :variant="videoRoute === 'video_transcript' ? 'solid' : 'outline'"
+          @click="videoRoute = 'video_transcript'"
+        >
+          Audio
+        </UButton>
+        <UButton
+          :variant="videoRoute === 'video_combined' ? 'solid' : 'outline'"
+          @click="videoRoute = 'video_combined'"
+        >
+          Both
+        </UButton>
+      </div>
+
+      <!-- Text/Image/Video search bar -->
       <div v-if="queryRoute !== 'tags'" class="flex flex-col sm:flex-row gap-4">
         <UInput
           v-model="queryTextInput"
           size="xl"
-          placeholder="Enter your search..."
+          :placeholder="queryRoute === 'video' ? 'Search videos...' : 'Enter your search...'"
           class="w-full text-lg"
         />
         <div class="flex justify-center">

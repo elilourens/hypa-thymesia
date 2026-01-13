@@ -97,10 +97,14 @@ export function useIngest() {
   type BaseQueryOpts = { top_k?: number; group_id?: string }
   type TextQueryOpts = BaseQueryOpts & {
     query: string
-    route: 'text' | 'image' | 'extracted_image' // UPDATED
+    route: 'text' | 'image' | 'extracted_image' | 'video_frames' | 'video_transcript' | 'video_combined' // UPDATED: added video routes
     search_mode?: 'smart' | 'keyword' // NEW: search mode for text queries
   }
   type ImageQueryOpts = BaseQueryOpts & { file: File }
+  type VideoQueryOpts = BaseQueryOpts & {
+    query: string
+    route: 'video_frames' | 'video_transcript' | 'video_combined'
+  }
 
   interface Match {
     id: string
@@ -309,12 +313,57 @@ export function useIngest() {
     }
   }
 
+  // --- Upload Video ---
+  async function uploadVideo(file: File, groupId?: string): Promise<UploadResponse> {
+    try {
+      const headers = await authHeaders()
+      const fd = new FormData()
+      fd.append('file', file)
+      if (groupId) fd.append('group_id', groupId)
+
+      const response = await $fetch<UploadResponse>(`${API_BASE}/ingest/upload-video`, {
+        method: 'POST',
+        headers,
+        body: fd,
+      })
+
+      return response
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Video upload failed')
+    }
+  }
+
+  // --- Query Video ---
+  async function queryVideo(opts: VideoQueryOpts): Promise<QueryResponse> {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(await authHeaders()),
+      }
+
+      return await $fetch<QueryResponse>(`${API_BASE}/ingest/query-video`, {
+        method: 'POST',
+        headers,
+        body: {
+          query_text: opts.query,
+          route: opts.route,
+          top_k: opts.top_k ?? 10,
+          group_id: opts.group_id ?? undefined,
+        },
+      })
+    } catch (err: any) {
+      throw new Error(err?.data || err?.message || 'Video query failed')
+    }
+  }
+
   return {
     uploadFile,
+    uploadVideo,
     getProcessingStatus,
     pollProcessingStatus,
     queryText,
     queryImage,
+    queryVideo,
     deleteDoc,
     queryByTags,
     queryImagesByTags,

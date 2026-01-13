@@ -8,7 +8,7 @@ import BodyCard from '@/components/BodyCard.vue'
 import GoogleDriveLinkCard from '@/components/GoogleDriveLinkCard.vue'
 import OneDriveLinkCard from '@/components/OneDriveLinkCard.vue'
 
-const { uploadFile, pollProcessingStatus } = useIngest()
+const { uploadFile, uploadVideo, pollProcessingStatus } = useIngest()
 const { createGroup } = useGroupsApi()
 const { isQuotaError, getQuotaFromError } = useQuota()
 
@@ -75,6 +75,12 @@ async function resolveGroupId(): Promise<string | undefined> {
   return undefined // "none"
 }
 
+// Check if file is a video
+function isVideoFile(file: File): boolean {
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  return ['mp4', 'avi', 'mov', 'mkv', 'webm'].includes(ext || '')
+}
+
 async function doUpload(): Promise<void> {
   error.value = null
   success.value = null
@@ -101,7 +107,10 @@ async function doUpload(): Promise<void> {
     const uploadPromises = files.value.map(async (file, idx) => {
       const arrayIdx = startIdx + idx
       try {
-        const response = await uploadFile(file, groupId, enableTagging.value)
+        // Route to appropriate upload endpoint based on file type
+        const response = isVideoFile(file)
+          ? await uploadVideo(file, groupId)
+          : await uploadFile(file, groupId, enableTagging.value)
 
         // Update to queued
         processingFiles.value[arrayIdx] = {
@@ -195,9 +204,9 @@ async function doUpload(): Promise<void> {
           multiple
           label="Drop your file here"
           layout="list"
-          description="PDF, DOCX, PPT, PPTX, TXT, PNG, JPG"
+          description="PDF, DOCX, PPT, PPTX, TXT, PNG, JPG, MP4, AVI, MOV"
           class="w-96 min-h-48"
-          accept=".pdf,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg"
+          accept=".pdf,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.mp4,.avi,.mov,.mkv,.webm"
         />
       </div>
 

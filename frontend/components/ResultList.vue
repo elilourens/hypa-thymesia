@@ -248,6 +248,36 @@ watch(
           pendingFetches.value.delete(cacheKey)
         }
       }
+
+      // For video frame results, fetch signed URL for frame image
+      if (r.metadata?.source === 'video_frame' && !r.metadata?.signed_url) {
+        const cacheKey = `${r.metadata.bucket}:${r.metadata.storage_path}`
+
+        // Check cache first
+        if (urlCache.value.has(cacheKey)) {
+          r.metadata.signed_url = urlCache.value.get(cacheKey)
+          continue
+        }
+
+        // Skip if already fetching
+        if (pendingFetches.value.has(cacheKey)) continue
+
+        try {
+          pendingFetches.value.add(cacheKey)
+          const url = await getThumbnailUrl(
+            r.metadata.bucket,
+            r.metadata.storage_path
+          )
+          if (url) {
+            r.metadata.signed_url = url
+            urlCache.value.set(cacheKey, url)
+          }
+        } catch (err) {
+          console.error('Failed to get thumbnail URL for video frame', r.metadata.storage_path, err)
+        } finally {
+          pendingFetches.value.delete(cacheKey)
+        }
+      }
     }
   },
   { immediate: true }
@@ -384,6 +414,41 @@ watch(
             >
               {{ tag.tag_name }} ({{ (tag.confidence * 100).toFixed(0) }}%)
             </UBadge>
+          </div>
+        </div>
+
+        <!-- Render video frame hits -->
+        <div v-else-if="r.metadata?.source === 'video_frame'">
+          <img
+            v-if="r.metadata?.signed_url"
+            :src="r.metadata.signed_url"
+            :alt="`Video frame at ${r.metadata?.timestamp?.toFixed(1)}s`"
+            class="object-contain mx-auto p-2 rounded-md border border-gray-200"
+          />
+          <p v-else class="text-sm text-gray-400 italic">
+            (Frame loading...)
+          </p>
+
+          <div class="mt-2 space-y-1 text-sm text-gray-600">
+            <p v-if="r.metadata?.timestamp">
+              <strong>Timestamp:</strong> {{ Math.floor(r.metadata.timestamp / 60) }}:{{ (r.metadata.timestamp % 60).toFixed(1).padStart(4, '0') }}
+            </p>
+            <p v-if="r.metadata?.scene_id">
+              <strong>Scene:</strong> {{ r.metadata.scene_id }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Render video transcript hits -->
+        <div v-else-if="r.metadata?.source === 'video_transcript'">
+          <div class="p-3 bg-gray-800 rounded-md">
+            <p class="text-sm">{{ r.metadata?.text }}</p>
+          </div>
+
+          <div class="mt-2 space-y-1 text-sm text-gray-600">
+            <p v-if="r.metadata?.start_time !== undefined && r.metadata?.end_time !== undefined">
+              <strong>Time:</strong> {{ Math.floor(r.metadata.start_time / 60) }}:{{ (r.metadata.start_time % 60).toFixed(1).padStart(4, '0') }} - {{ Math.floor(r.metadata.end_time / 60) }}:{{ (r.metadata.end_time % 60).toFixed(1).padStart(4, '0') }}
+            </p>
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "hypa-thymesia-video-query"
 version = "0.1.0"
-description = "Video embedding and querying using CLIP and ChromaDB"
+description = "Video embedding and querying microservice using CLIP and Pinecone"
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 
@@ -11,14 +11,19 @@ opencv-python = "^4.9.0"
 torch = {version = "^2.6.0", source = "pypi"}
 torchvision = {version = "^0.21.0", source = "pypi"}
 transformers = "^4.36.0"
-chromadb = "^0.4.22"
 pillow = "^10.2.0"
 numpy = "^1.26.0"
 tqdm = "^4.66.0"
-gradio = "^4.13.0"
 sympy = "1.13.1"
 faster-whisper = "^1.0.0"
 sentence-transformers = "^2.2.2"
+pinecone-client = "^5.0.0"
+supabase = "^2.0.0"
+python-dotenv = "^1.0.0"
+fastapi = "^0.115.0"
+python-multipart = "^0.0.18"
+uvicorn = "^0.34.0"
+websockets = ">=14.0"
 
 [[tool.poetry.source]]
 name = "pypi"
