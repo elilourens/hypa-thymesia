@@ -304,18 +304,19 @@ async function doUpload(): Promise<void> {
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium truncate">{{ file.filename }}</p>
             <div class="flex items-center gap-2 mt-1">
-              <span
-                class="text-xs px-2 py-0.5 rounded-full"
-                :class="{
-                  'bg-blue-500/20 text-blue-400': file.status === 'uploading',
-                  'bg-yellow-500/20 text-yellow-400': file.status === 'queued',
-                  'bg-purple-500/20 text-purple-400': file.status === 'processing',
-                  'bg-green-500/20 text-green-400': file.status === 'completed',
-                  'bg-red-500/20 text-red-400': file.status === 'failed',
-                }"
+              <UBadge
+                :color="
+                  file.status === 'uploading' ? 'info' :
+                  file.status === 'queued' ? 'warning' :
+                  file.status === 'processing' ? 'secondary' :
+                  file.status === 'completed' ? 'success' :
+                  file.status === 'failed' ? 'error' : 'neutral'
+                "
+                variant="soft"
+                size="xs"
               >
                 {{ file.status }}
-              </span>
+              </UBadge>
               <span v-if="file.text_chunks || file.images" class="text-xs text-zinc-500">
                 <span v-if="file.text_chunks">{{ file.text_chunks }} chunks</span>
                 <span v-if="file.text_chunks && file.images"> • </span>

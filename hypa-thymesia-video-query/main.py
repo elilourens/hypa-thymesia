@@ -21,6 +21,7 @@ from src.video.processor import VideoProcessor
 from src.audio.audio_processor import AudioProcessor
 from src.storage.unified_database import VideoFrameDatabase, TranscriptDatabase
 from src.storage import supabase_service as sb
+from src.storage import pinecone_service as pc
 
 # Load environment variables
 load_dotenv()
@@ -471,11 +472,40 @@ async def upload_video(
     except Exception as e:
         logger.error(f"Error processing video: {e}", exc_info=True)
 
-        # Cleanup: Delete the failed video file and doc_meta record
+        # Cleanup: Delete all resources associated with the failed video
         try:
-            logger.info(f"Cleaning up failed video upload: deleting video file and doc_meta record for video_id={video_id}")
+            logger.info(f"Cleaning up failed video upload for video_id={video_id}")
 
-            # Delete video file from storage if it was uploaded
+            # 1. Delete Pinecone vectors (frames)
+            try:
+                pc.delete_by_filter(
+                    filter_dict={"video_id": {"$eq": video_id}},
+                    modality="video_frame",
+                    namespace=user_id,
+                )
+                logger.info(f"Deleted frame vectors from Pinecone for video_id={video_id}")
+            except Exception as del_error:
+                logger.error(f"Failed to delete frame vectors from Pinecone: {del_error}")
+
+            # 2. Delete Pinecone vectors (transcripts)
+            try:
+                pc.delete_by_filter(
+                    filter_dict={"video_id": {"$eq": video_id}},
+                    modality="video_transcript",
+                    namespace=user_id,
+                )
+                logger.info(f"Deleted transcript vectors from Pinecone for video_id={video_id}")
+            except Exception as del_error:
+                logger.error(f"Failed to delete transcript vectors from Pinecone: {del_error}")
+
+            # 3. Delete frame images from storage
+            try:
+                sb.delete_frames_for_video(user_id, video_id)
+                logger.info(f"Deleted frame images from storage for video_id={video_id}")
+            except Exception as del_error:
+                logger.error(f"Failed to delete frame images from storage: {del_error}")
+
+            # 4. Delete video file from storage if it was uploaded
             if storage_path:
                 try:
                     sb.delete_video_from_bucket(storage_path)
@@ -483,7 +513,16 @@ async def upload_video(
                 except Exception as del_error:
                     logger.error(f"Failed to delete video file from storage: {del_error}")
 
-            # Delete doc_meta record
+            # 5. Delete app_chunks records
+            try:
+                sb.supabase.table("app_chunks").delete().eq(
+                    "doc_id", video_id
+                ).eq("user_id", user_id).execute()
+                logger.info(f"Deleted app_chunks records for video_id={video_id}")
+            except Exception as del_error:
+                logger.error(f"Failed to delete app_chunks records: {del_error}")
+
+            # 6. Delete doc_meta record
             sb.supabase.table("app_doc_meta").delete().eq(
                 "doc_id", video_id
             ).eq("user_id", user_id).execute()

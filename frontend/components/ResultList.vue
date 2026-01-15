@@ -441,8 +441,8 @@ watch(
 
         <!-- Render video transcript hits -->
         <div v-else-if="r.metadata?.source === 'video_transcript'">
-          <div class="p-3 bg-gray-800 rounded-md">
-            <p class="text-sm">{{ r.metadata?.text }}</p>
+          <div class="p-3">
+            <p class="text-sm">"{{ r.metadata?.text }}"</p>
           </div>
 
           <div class="mt-2 space-y-1 text-sm text-gray-600">
