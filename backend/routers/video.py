@@ -1,11 +1,12 @@
 """
 Video ingestion and query router.
-Proxies requests to the hypa-thymesia-video-query service.
+Proxies upload requests to the hypa-thymesia-video-query service.
+Handles video queries directly using local embedders and Pinecone.
 """
 import logging
 import httpx
 import os
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, Form
@@ -14,6 +15,8 @@ from core.config import get_settings
 from core.deps import get_supabase
 from core.security import get_current_user, AuthUser
 from core.user_limits import check_user_can_upload, ensure_user_settings_exist
+from embed.video_embeddings import get_clip_embedder, get_transcript_embedder
+from data_upload.pinecone_services import query_vectors
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["video"])
@@ -203,81 +206,218 @@ async def query_video(
         )
 
     try:
-        # Proxy request to video-query service
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{VIDEO_SERVICE_URL}/api/v1/video/query",
-                json={
-                    "user_id": user_id,
-                    "query_text": query_text,
-                    "route": route,
-                    "top_k": top_k,
-                    "group_id": group_id,
-                }
+        # Initialize embedders (singletons, lazy loaded)
+        clip_embedder = get_clip_embedder()
+        transcript_embedder = get_transcript_embedder()
+
+        # Prepare metadata filter
+        meta_filter = None
+        if group_id:
+            meta_filter = {"group_id": {"$eq": group_id}}
+
+        matches = []
+
+        if route == "video_frames":
+            # Query video frames using CLIP text embedding
+            logger.info(f"Querying video frames for user {user_id}: {query_text[:50]}...")
+            query_embedding = clip_embedder.embed_text(query_text)
+
+            result = query_vectors(
+                vector=query_embedding.tolist(),
+                modality="video_frame",
+                top_k=top_k * 3,  # Fetch more for diversity
+                namespace=user_id,
+                metadata_filter=meta_filter,
+                include_metadata=True,
             )
-            response.raise_for_status()
-            result = response.json()
 
-            # Transform response to match frontend expectations
-            # Video service returns {"results": [...]}, frontend expects {"matches": [...]}
-            matches = result.get("results", [])
+            # Format and diversify results
+            matches = _format_video_results(result, "video_frame")
+            matches = _diversify_frame_results(matches, top_k)
 
-            # Handle combined route: flatten dict of {frames: [...], transcripts: [...]} into single list
-            if isinstance(matches, dict) and ("frames" in matches or "transcripts" in matches):
-                flattened = []
+        elif route == "video_transcript":
+            # Query video transcripts using transcript embedding
+            logger.info(f"Querying video transcripts for user {user_id}: {query_text[:50]}...")
+            query_embedding = transcript_embedder.embed_text(query_text)
 
-                # Add frames
-                if "frames" in matches and isinstance(matches["frames"], list):
-                    for match in matches["frames"]:
-                        if isinstance(match, dict) and "metadata" in match:
-                            meta = match["metadata"]
-                            if "video_filename" in meta and "title" not in meta:
-                                meta["title"] = meta["video_filename"]
-                            if "source" not in meta:
-                                meta["source"] = "video_frame"
-                        flattened.append(match)
+            result = query_vectors(
+                vector=query_embedding.tolist(),
+                modality="video_transcript",
+                top_k=top_k * 3,  # Fetch more for diversity
+                namespace=user_id,
+                metadata_filter=meta_filter,
+                include_metadata=True,
+            )
 
-                # Add transcripts
-                if "transcripts" in matches and isinstance(matches["transcripts"], list):
-                    for match in matches["transcripts"]:
-                        if isinstance(match, dict) and "metadata" in match:
-                            meta = match["metadata"]
-                            if "video_filename" in meta and "title" not in meta:
-                                meta["title"] = meta["video_filename"]
-                            if "source" not in meta:
-                                meta["source"] = "video_transcript"
-                        flattened.append(match)
+            # Format and diversify results
+            matches = _format_video_results(result, "video_transcript")
+            matches = _diversify_transcript_results(matches, top_k)
 
-                matches = flattened
+        elif route == "video_combined":
+            # Query both frames and transcripts
+            logger.info(f"Querying video frames+transcripts for user {user_id}: {query_text[:50]}...")
 
-            # Enrich metadata for single-route responses (already a list)
-            elif isinstance(matches, list):
-                for match in matches:
-                    if isinstance(match, dict) and "metadata" in match:
-                        meta = match["metadata"]
-                        # Add title field (use video_filename or default)
-                        if "video_filename" in meta and "title" not in meta:
-                            meta["title"] = meta["video_filename"]
-                        # Add source field (frontend checks for 'source', not 'modality')
-                        if "source" not in meta:
-                            if "timestamp" in meta or "frame_index" in meta:
-                                meta["source"] = "video_frame"
-                            elif "text" in meta or "start_time" in meta:
-                                meta["source"] = "video_transcript"
+            frame_embedding = clip_embedder.embed_text(query_text)
+            transcript_embedding = transcript_embedder.embed_text(query_text)
 
-            return {
-                "matches": matches,
-                "top_k": top_k,
-                "route": route,
-                "namespace": user_id,
-            }
+            frame_result = query_vectors(
+                vector=frame_embedding.tolist(),
+                modality="video_frame",
+                top_k=top_k * 3,
+                namespace=user_id,
+                metadata_filter=meta_filter,
+                include_metadata=True,
+            )
 
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Video query service error: {e.response.status_code} - {e.response.text}")
-        raise HTTPException(
-            status_code=e.response.status_code,
-            detail=f"Video query service error: {e.response.text}"
-        )
+            transcript_result = query_vectors(
+                vector=transcript_embedding.tolist(),
+                modality="video_transcript",
+                top_k=top_k * 3,
+                namespace=user_id,
+                metadata_filter=meta_filter,
+                include_metadata=True,
+            )
+
+            # Format and diversify each type
+            frame_matches = _format_video_results(frame_result, "video_frame")
+            transcript_matches = _format_video_results(transcript_result, "video_transcript")
+
+            frame_matches = _diversify_frame_results(frame_matches, top_k)
+            transcript_matches = _diversify_transcript_results(transcript_matches, top_k)
+
+            # Combine both result types
+            matches = frame_matches + transcript_matches
+
+        logger.info(f"Video query completed: {len(matches)} results for user {user_id}")
+
+        return {
+            "matches": matches,
+            "top_k": top_k,
+            "route": route,
+            "namespace": user_id,
+        }
+
     except Exception as e:
-        logger.error(f"Video query failed: {e}", exc_info=True)
+        logger.error(f"Video query failed for user {user_id}: {e}", exc_info=True)
         raise HTTPException(500, detail=f"Video query failed: {str(e)}")
+
+
+# Helper functions for video query processing
+
+def _format_video_results(result, source_type: str) -> List[Dict[str, Any]]:
+    """Format Pinecone results and enrich metadata for frontend."""
+    formatted = []
+
+    for match in result.matches:
+        metadata = dict(match.metadata or {})
+
+        # Add source field for frontend
+        metadata["source"] = source_type
+
+        # Add title field (use video_filename or default)
+        if "video_filename" in metadata and "title" not in metadata:
+            metadata["title"] = metadata["video_filename"]
+
+        formatted.append({
+            "id": match.id,
+            "score": match.score,
+            "metadata": metadata,
+        })
+
+    return formatted
+
+
+def _diversify_frame_results(results: List[Dict[str, Any]], n_results: int) -> List[Dict[str, Any]]:
+    """Apply diversity to video frame results based on scene_id or timestamp."""
+    if len(results) <= n_results:
+        return results
+
+    selected = []
+    remaining = results.copy()
+    selected_scenes = set()
+
+    # Always select the best match first
+    first_result = remaining.pop(0)
+    selected.append(first_result)
+    if "scene_id" in first_result["metadata"]:
+        selected_scenes.add(first_result["metadata"]["scene_id"])
+
+    has_scene_ids = "scene_id" in first_result["metadata"]
+
+    # Greedily select remaining results
+    while len(selected) < n_results and remaining:
+        best_score = -float("inf")
+        best_idx = 0
+
+        for idx, candidate in enumerate(remaining):
+            if has_scene_ids:
+                # Scene-based diversity
+                candidate_scene = candidate["metadata"].get("scene_id")
+                diversity_score = 1.0 if candidate_scene not in selected_scenes else 0.0
+            else:
+                # Time-based diversity
+                min_time_diff = float("inf")
+                candidate_time = candidate["metadata"]["timestamp"]
+
+                for selected_result in selected:
+                    selected_time = selected_result["metadata"]["timestamp"]
+                    time_diff = abs(candidate_time - selected_time)
+                    min_time_diff = min(min_time_diff, time_diff)
+
+                diversity_score = min(min_time_diff / 10.0, 1.0)
+
+            # Combined score (50% relevance, 50% diversity)
+            combined_score = 0.5 * candidate["score"] + 0.5 * diversity_score
+
+            if combined_score > best_score:
+                best_score = combined_score
+                best_idx = idx
+
+        selected_result = remaining.pop(best_idx)
+        selected.append(selected_result)
+
+        if has_scene_ids and "scene_id" in selected_result["metadata"]:
+            selected_scenes.add(selected_result["metadata"]["scene_id"])
+
+    return selected
+
+
+def _diversify_transcript_results(results: List[Dict[str, Any]], n_results: int) -> List[Dict[str, Any]]:
+    """Apply temporal diversity to video transcript results."""
+    if len(results) <= n_results:
+        return results
+
+    selected = []
+    remaining = results.copy()
+
+    # Always select the best match first
+    selected.append(remaining.pop(0))
+
+    # Greedily select remaining results
+    while len(selected) < n_results and remaining:
+        best_score = -float("inf")
+        best_idx = 0
+
+        for idx, candidate in enumerate(remaining):
+            # Calculate temporal diversity
+            min_time_diff = float("inf")
+            candidate_start = float(candidate["metadata"]["start_time"])
+
+            for selected_result in selected:
+                selected_start = float(selected_result["metadata"]["start_time"])
+                time_diff = abs(candidate_start - selected_start)
+                min_time_diff = min(min_time_diff, time_diff)
+
+            # Normalize temporal diversity (20s = full diversity)
+            diversity_score = min(min_time_diff / 20.0, 1.0)
+
+            # Combined score (50% relevance, 50% diversity)
+            combined_score = 0.5 * candidate["score"] + 0.5 * diversity_score
+
+            if combined_score > best_score:
+                best_score = combined_score
+                best_idx = idx
+
+        selected.append(remaining.pop(best_idx))
+
+    return selected

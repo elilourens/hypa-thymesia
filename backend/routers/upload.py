@@ -202,19 +202,42 @@ async def get_processing_status(
     """
     Get the processing status of a document.
     Returns status (queued, processing, completed, failed) and additional metadata.
+
+    For videos: includes long_running indicator if processing takes >2 minutes.
+    Frontend should poll every 30 seconds for videos and show "this might take a while" message.
     """
     user_id = auth.id
 
     try:
         # Query doc_meta for status
         response = supabase.table("app_doc_meta").select(
-            "doc_id, processing_status, filename, text_chunks_count, images_count, error_message"
+            "doc_id, processing_status, filename, text_chunks_count, images_count, error_message, modality, created_at"
         ).eq("doc_id", doc_id).eq("user_id", user_id).execute()
 
         if not response.data or len(response.data) == 0:
             raise HTTPException(status_code=404, detail="Document not found")
 
         doc_meta = response.data[0]
+
+        # Calculate processing time
+        from datetime import datetime, timezone
+        created_at = doc_meta.get("created_at")
+        long_running = False
+        processing_time_seconds = None
+
+        if created_at:
+            try:
+                # Parse created_at timestamp
+                created_datetime = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                now = datetime.now(timezone.utc)
+                processing_time_seconds = (now - created_datetime).total_seconds()
+
+                # Mark as long_running if processing/queued for more than 2 minutes (120 seconds)
+                status = doc_meta.get("processing_status", "unknown")
+                if status in ("queued", "processing") and processing_time_seconds > 120:
+                    long_running = True
+            except Exception as e:
+                logger.warning(f"Error calculating processing time: {e}")
 
         return {
             "doc_id": doc_meta["doc_id"],
@@ -223,6 +246,9 @@ async def get_processing_status(
             "text_chunks_count": doc_meta.get("text_chunks_count", 0),
             "images_count": doc_meta.get("images_count", 0),
             "error_message": doc_meta.get("error_message"),
+            "modality": doc_meta.get("modality", "text"),
+            "long_running": long_running,
+            "processing_time_seconds": processing_time_seconds,
         }
 
     except HTTPException:

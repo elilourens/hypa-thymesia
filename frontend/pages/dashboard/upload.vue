@@ -26,6 +26,8 @@ interface FileProcessing {
   text_chunks?: number
   images?: number
   error_message?: string
+  long_running?: boolean
+  modality?: string
 }
 const processingFiles = ref<FileProcessing[]>([])
 
@@ -131,6 +133,8 @@ async function doUpload(): Promise<void> {
               text_chunks: status.text_chunks_count,
               images: status.images_count,
               error_message: status.error_message || undefined,
+              long_running: status.long_running,
+              modality: status.modality,
             }
           }
         ).catch(err => {
@@ -318,6 +322,10 @@ async function doUpload(): Promise<void> {
                 <span v-if="file.images">{{ file.images }} images</span>
               </span>
             </div>
+            <p v-if="file.long_running && (file.status === 'processing' || file.status === 'queued')" class="text-xs text-yellow-400 mt-1 flex items-center gap-1">
+              <UIcon name="i-heroicons-clock" class="w-3 h-3" />
+              This might take a while (videos can take several minutes)
+            </p>
             <p v-if="file.error_message" class="text-xs text-red-400 mt-1">
               {{ file.error_message }}
             </p>

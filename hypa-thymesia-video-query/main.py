@@ -171,12 +171,53 @@ async def upload_video(
     if ext not in ("mp4", "avi", "mov", "mkv", "webm"):
         raise HTTPException(400, detail=f"Invalid video format: .{ext}. Supported: .mp4, .avi, .mov, .mkv, .webm")
 
+    # Read file content
+    content = await file.read()
+
+    # Upload video file to Supabase storage FIRST (before processing)
+    logger.info("Uploading video file to Supabase storage...")
+    storage_path = None
+    try:
+        storage_path = sb.upload_video_to_bucket(
+            file_content=content,
+            filename=file.filename,
+            user_id=user_id,
+            mime_type=file.content_type,
+        )
+        if not storage_path:
+            raise HTTPException(500, detail="Failed to upload video to storage")
+
+        logger.info(f"Video uploaded to storage: {storage_path}")
+
+        # Update app_doc_meta with storage_path
+        sb.supabase.table("app_doc_meta").update({
+            "storage_path": storage_path,
+        }).eq("doc_id", video_id).eq("user_id", user_id).execute()
+
+        # Create chunk entry for the video file itself
+        video_chunk_id = str(uuid4())
+        sb.supabase.table("app_chunks").insert({
+            "chunk_id": video_chunk_id,
+            "doc_id": video_id,
+            "chunk_index": 1,
+            "modality": "video",
+            "storage_path": storage_path,
+            "bucket": sb.VIDEO_BUCKET,
+            "mime_type": file.content_type,
+            "user_id": user_id,
+            "size_bytes": len(content),
+        }).execute()
+        logger.info(f"Created video chunk entry: {video_chunk_id}")
+
+    except Exception as e:
+        logger.error(f"Failed to upload video to storage: {e}", exc_info=True)
+        raise HTTPException(500, detail=f"Failed to upload video to storage: {str(e)}")
+
     # Create temporary file for video processing
     temp_video_path = None
     try:
         # Save uploaded file to temporary location
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
-            content = await file.read()
             temp_file.write(content)
             temp_video_path = temp_file.name
 
@@ -317,7 +358,8 @@ async def upload_video(
         if failed_frames:
             logger.warning(f"Failed frames: {failed_frames}")
 
-        # Prepare metadata after uploads complete (skip failed frames)
+        # Prepare metadata and create chunk entries for frames after uploads complete (skip failed frames)
+        frame_chunk_rows = []
         for task, storage_path in zip(frame_upload_tasks, storage_paths):
             # Skip frames that failed to upload
             if storage_path is None:
@@ -343,6 +385,24 @@ async def upload_video(
 
             metadatas.append(metadata)
             ids.append(f"{video_id}:frame_{idx}")
+
+            # Prepare chunk row for this frame
+            frame_chunk_rows.append({
+                "chunk_id": str(uuid4()),
+                "doc_id": video_id,
+                "chunk_index": idx + 2,  # Start at 2 (1 is the video file itself)
+                "modality": "video_frame",
+                "storage_path": storage_path,
+                "bucket": "video-frames",
+                "mime_type": "image/jpeg",
+                "user_id": user_id,
+            })
+
+        # Batch insert frame chunks into app_chunks
+        if frame_chunk_rows:
+            logger.info(f"Creating {len(frame_chunk_rows)} frame chunk entries in app_chunks...")
+            sb.supabase.table("app_chunks").insert(frame_chunk_rows).execute()
+            logger.info(f"Successfully created {len(frame_chunk_rows)} frame chunk entries")
 
         # Filter embeddings to match successful uploads only
         if failed_frames:
@@ -410,6 +470,27 @@ async def upload_video(
 
     except Exception as e:
         logger.error(f"Error processing video: {e}", exc_info=True)
+
+        # Cleanup: Delete the failed video file and doc_meta record
+        try:
+            logger.info(f"Cleaning up failed video upload: deleting video file and doc_meta record for video_id={video_id}")
+
+            # Delete video file from storage if it was uploaded
+            if storage_path:
+                try:
+                    sb.delete_video_from_bucket(storage_path)
+                    logger.info(f"Deleted video file from storage: {storage_path}")
+                except Exception as del_error:
+                    logger.error(f"Failed to delete video file from storage: {del_error}")
+
+            # Delete doc_meta record
+            sb.supabase.table("app_doc_meta").delete().eq(
+                "doc_id", video_id
+            ).eq("user_id", user_id).execute()
+            logger.info(f"Successfully deleted failed video record: video_id={video_id}")
+        except Exception as cleanup_error:
+            logger.error(f"Failed to cleanup after video processing failure: {cleanup_error}")
+
         raise HTTPException(500, detail=f"Video processing failed: {str(e)}")
 
     finally:

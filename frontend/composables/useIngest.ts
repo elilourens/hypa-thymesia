@@ -53,6 +53,9 @@ export function useIngest() {
     text_chunks_count: number
     images_count: number
     error_message: string | null
+    modality?: string
+    long_running?: boolean
+    processing_time_seconds?: number | null
   }
 
   async function getProcessingStatus(docId: string): Promise<ProcessingStatus> {
@@ -75,6 +78,8 @@ export function useIngest() {
     maxAttempts: number = 60,
     intervalMs: number = 2000
   ): Promise<ProcessingStatus> {
+    let currentIntervalMs = intervalMs
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const status = await getProcessingStatus(docId)
 
@@ -86,8 +91,13 @@ export function useIngest() {
         return status
       }
 
+      // For videos or long-running tasks, switch to slower polling (30 seconds)
+      if (status.long_running || status.modality === 'video') {
+        currentIntervalMs = 30000 // 30 seconds for videos/long-running tasks
+      }
+
       // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, intervalMs))
+      await new Promise(resolve => setTimeout(resolve, currentIntervalMs))
     }
 
     throw new Error('Processing timeout: file took too long to process')

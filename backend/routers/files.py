@@ -1,10 +1,12 @@
 # app/api/routes/files.py
+import logging
 from typing import Optional, Literal
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from core.security import get_current_user, AuthUser
 from core.deps import get_supabase
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files", tags=["files"])
 
 SortField = Literal["created_at", "size", "name"]
@@ -81,8 +83,8 @@ def list_files(
 
     sb = supabase.table(base_table).select("*", count="exact").eq("user_id", user_id)
 
-    # UPDATED: Exclude deep embed images (extracted-images bucket)
-    sb = sb.neq("bucket", "extracted-images")
+    # UPDATED: Exclude deep embed images (extracted-images bucket) and video frames (video-frames bucket)
+    sb = sb.neq("bucket", "extracted-images").neq("bucket", "video-frames")
 
     if q:
         sb = sb.ilike("filename", f"%{q}%")

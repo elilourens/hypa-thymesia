@@ -21,6 +21,8 @@ pc = Pinecone(
 TEXT_INDEX_NAME = os.getenv("PINECONE_TEXT_INDEX_NAME")
 IMAGE_INDEX_NAME = os.getenv("PINECONE_IMAGE_INDEX_NAME")
 EXTRACTED_IMAGE_INDEX_NAME = os.getenv("PINECONE_EXTRACTED_IMAGE_INDEX_NAME")  # NEW
+VIDEO_FRAME_INDEX_NAME = os.getenv("PINECONE_VIDEO_FRAME_INDEX_NAME", "video-frames")
+VIDEO_TRANSCRIPT_INDEX_NAME = os.getenv("PINECONE_VIDEO_TRANSCRIPT_INDEX_NAME", "video-transcripts")
 
 if not TEXT_INDEX_NAME:
     raise RuntimeError("Missing PINECONE_TEXT_INDEX_NAME.")
@@ -32,20 +34,40 @@ if not EXTRACTED_IMAGE_INDEX_NAME:
 # Lazy init: create Index handles
 _text_index = pc.Index(TEXT_INDEX_NAME)
 _image_index = pc.Index(IMAGE_INDEX_NAME)
-_extracted_image_index = pc.Index(EXTRACTED_IMAGE_INDEX_NAME) 
+_extracted_image_index = pc.Index(EXTRACTED_IMAGE_INDEX_NAME)
+_video_frame_index = None  # Lazy loaded
+_video_transcript_index = None  # Lazy loaded
 
-# Model dims 
+# Model dims
 TEXT_DIM = 384          # all-MiniLM-L12-v2
 IMAGE_TEXT_DIM = 512    # clip-ViT-B-32 (text+image)
+VIDEO_FRAME_DIM = 512   # CLIP ViT-B-32 for video frames
+VIDEO_TRANSCRIPT_DIM = 384  # all-MiniLM-L6-v2 for transcripts
 
 MAX_BATCH = int(os.getenv("PINECONE_MAX_BATCH", "100"))
 
-Modality = Literal["text", "image", "clip_text", "extracted_image"] 
+Modality = Literal["text", "image", "clip_text", "extracted_image", "video_frame", "video_transcript"] 
 
 # -------------------- Utilities --------------------
 def _chunked(xs: list, n: int):
     for i in range(0, len(xs), n):
         yield xs[i:i+n]
+
+def _get_video_frame_index():
+    """Lazy load video frame index."""
+    global _video_frame_index
+    if _video_frame_index is None:
+        _video_frame_index = pc.Index(VIDEO_FRAME_INDEX_NAME)
+    return _video_frame_index
+
+
+def _get_video_transcript_index():
+    """Lazy load video transcript index."""
+    global _video_transcript_index
+    if _video_transcript_index is None:
+        _video_transcript_index = pc.Index(VIDEO_TRANSCRIPT_INDEX_NAME)
+    return _video_transcript_index
+
 
 def _index_for_modality(modality: Modality):
     if modality == "text":
@@ -55,6 +77,10 @@ def _index_for_modality(modality: Modality):
         return _image_index, IMAGE_TEXT_DIM
     if modality == "extracted_image":  # NEW
         return _extracted_image_index, IMAGE_TEXT_DIM
+    if modality == "video_frame":
+        return _get_video_frame_index(), VIDEO_FRAME_DIM
+    if modality == "video_transcript":
+        return _get_video_transcript_index(), VIDEO_TRANSCRIPT_DIM
     raise ValueError(f"Unknown modality: {modality}")
 
 def build_vector_item(*, vector_id: str, values: List[float], metadata: Dict[str, Any]) -> Dict[str, Any]:
