@@ -132,5 +132,29 @@ export function useFilesApi() {
     return getSignedUrl(bucket, path)
   }
 
-  return { listFiles, getSignedUrl, getThumbnailUrl }
+  /**
+   * Get video file info by doc_id.
+   * Returns bucket and storage_path needed to generate signed URL for video playback.
+   */
+  async function getVideoInfo(docId: string): Promise<{
+    doc_id: string
+    filename: string
+    bucket: string
+    storage_path: string
+    mime_type?: string
+  }> {
+    const headers = await authHeaders()
+
+    try {
+      return await $fetch(`${API_BASE}/storage/video-info/${docId}`, {
+        method: 'GET',
+        headers,
+      })
+    } catch (err: any) {
+      console.error('Error getting video info:', err)
+      throw new Error(err?.data?.detail || err?.message || 'Failed to get video info')
+    }
+  }
+
+  return { listFiles, getSignedUrl, getThumbnailUrl, getVideoInfo }
 }

@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { watch, ref } from 'vue'
+import { watch, ref, nextTick } from 'vue'
 import { marked } from 'marked'
 import { useFilesApi } from '~/composables/useFiles'
-const { getSignedUrl, getThumbnailUrl } = useFilesApi()
+const { getSignedUrl, getThumbnailUrl, getVideoInfo } = useFilesApi()
 const toast = useToast()
 
 const props = defineProps<{ results: any[], deleting?: boolean }>()
+
+// ========== Video Player Modal State ==========
+const videoModalOpen = ref(false)
+const videoUrl = ref('')
+const videoStartTime = ref(0)
+const videoFilename = ref('')
+const videoLoading = ref(false)
+const videoPlayer = ref<HTMLVideoElement | null>(null)
 
 // Track which results are showing formatted text (by result id)
 const showFormatted = ref<Record<string, boolean>>({})
@@ -172,6 +180,60 @@ async function handleOpenParentDoc(r: any) {
       color: 'error'
     })
   }
+}
+
+// ========== Video Player Functions ==========
+
+async function handlePlayVideo(r: any, timestamp: number) {
+  videoLoading.value = true
+  videoModalOpen.value = true
+  videoStartTime.value = timestamp
+
+  try {
+    // Get video info (bucket and storage_path) from the video_id
+    const videoId = r.metadata?.video_id
+    if (!videoId) {
+      throw new Error('Video ID not found in result metadata')
+    }
+
+    const info = await getVideoInfo(videoId)
+    videoFilename.value = info.filename || 'Video'
+
+    // Get signed URL for the video
+    const url = await getSignedUrl(info.bucket, info.storage_path, false)
+    if (!url) throw new Error('No URL returned')
+
+    videoUrl.value = url
+
+    // Wait for next tick to ensure video element is rendered, then seek
+    await nextTick()
+    if (videoPlayer.value) {
+      videoPlayer.value.currentTime = timestamp
+    }
+  } catch (err: any) {
+    toast.add({
+      title: 'Could not load video',
+      description: err.message || 'Error loading video',
+      color: 'error'
+    })
+    videoModalOpen.value = false
+  } finally {
+    videoLoading.value = false
+  }
+}
+
+function handleVideoLoaded() {
+  // Seek to the start time once metadata is loaded
+  if (videoPlayer.value && videoStartTime.value > 0) {
+    videoPlayer.value.currentTime = videoStartTime.value
+  }
+}
+
+function closeVideoModal() {
+  videoModalOpen.value = false
+  videoUrl.value = ''
+  videoStartTime.value = 0
+  videoFilename.value = ''
 }
 
 // ========== Auto Fetch Thumbnail URLs for Images and PDFs ==========
@@ -437,6 +499,19 @@ watch(
               <strong>Scene:</strong> {{ r.metadata.scene_id }}
             </p>
           </div>
+
+          <!-- Play Video Button -->
+          <div v-if="r.metadata?.video_id" class="mt-3">
+            <UButton
+              size="sm"
+              color="primary"
+              variant="soft"
+              icon="i-heroicons-play"
+              @click="handlePlayVideo(r, r.metadata?.timestamp || 0)"
+            >
+              Play from this frame
+            </UButton>
+          </div>
         </div>
 
         <!-- Render video transcript hits -->
@@ -449,6 +524,19 @@ watch(
             <p v-if="r.metadata?.start_time !== undefined && r.metadata?.end_time !== undefined">
               <strong>Time:</strong> {{ Math.floor(r.metadata.start_time / 60) }}:{{ (r.metadata.start_time % 60).toFixed(1).padStart(4, '0') }} - {{ Math.floor(r.metadata.end_time / 60) }}:{{ (r.metadata.end_time % 60).toFixed(1).padStart(4, '0') }}
             </p>
+          </div>
+
+          <!-- Play Video Button -->
+          <div v-if="r.metadata?.video_id" class="mt-3">
+            <UButton
+              size="sm"
+              color="primary"
+              variant="soft"
+              icon="i-heroicons-play"
+              @click="handlePlayVideo(r, r.metadata?.start_time || 0)"
+            >
+              Play from this segment
+            </UButton>
           </div>
         </div>
 
@@ -483,4 +571,38 @@ watch(
   <div v-else class="text-gray-400 text-sm italic text-center py-8">
     No results found.
   </div>
+
+  <!-- Video Player Modal -->
+  <UModal v-model:open="videoModalOpen" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-4xl' }">
+    <template #content>
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold">{{ videoFilename }}</h3>
+          <UButton
+            icon="i-heroicons-x-mark"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            @click="closeVideoModal"
+          />
+        </div>
+
+        <div v-if="videoLoading" class="flex items-center justify-center h-64">
+          <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 animate-spin text-gray-400" />
+        </div>
+
+        <video
+          v-else-if="videoUrl"
+          ref="videoPlayer"
+          :src="videoUrl"
+          controls
+          autoplay
+          class="w-full rounded-lg"
+          @loadedmetadata="handleVideoLoaded"
+        >
+          Your browser does not support video playback.
+        </video>
+      </div>
+    </template>
+  </UModal>
 </template>
