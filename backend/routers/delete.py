@@ -1,8 +1,8 @@
 # routes/delete.py (or wherever your delete endpoint lives)
 
 import logging
-from typing import Tuple, Set
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Tuple, Set, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from core.deps import get_supabase
 from core.security import get_current_user, AuthUser
 from data_upload.pinecone_services import delete_vectors_by_ids
@@ -10,14 +10,23 @@ from data_upload.pinecone_services import delete_vectors_by_ids
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
+# In-memory store for deletion status (consider using Redis for production)
+_deletion_status: Dict[str, Dict[str, Any]] = {}
+
 @router.delete("/delete-document")
 async def delete_document(
     doc_id: str = Query(..., description="The UUID of the document to delete"),
+    background_tasks: BackgroundTasks = None,
     auth: AuthUser = Depends(get_current_user),
     supabase = Depends(get_supabase),
 ):
     """
     Delete a document (regular document or video) and all associated data.
+    Runs in the background so users can continue querying while deletion happens.
+
+    Returns immediately with status "deleting" and the doc_id.
+    Use GET /ingest/delete-status/{doc_id} to check deletion progress.
+
     Automatically detects the document type and performs appropriate cleanup:
 
     For regular documents:
@@ -44,13 +53,71 @@ async def delete_document(
         raise HTTPException(404, detail="Document not found")
 
     modality = doc_meta_result.data[0].get("modality")
-    logger.info(f"Deleting document {doc_id} with modality={modality} for user {user_id}")
+    logger.info(f"Queueing background deletion for document {doc_id} with modality={modality} for user {user_id}")
 
-    # Route to appropriate deletion logic
-    if modality == "video":
-        return await _delete_video(doc_id=doc_id, user_id=user_id, supabase=supabase)
-    else:
-        return await _delete_regular_document(doc_id=doc_id, user_id=user_id, supabase=supabase)
+    # Initialize deletion status
+    _deletion_status[doc_id] = {
+        "status": "deleting",
+        "modality": modality,
+        "user_id": user_id,
+        "error": None,
+        "result": None
+    }
+
+    # Run deletion in background
+    background_tasks.add_task(_background_delete, doc_id, modality, user_id, supabase)
+
+    return {
+        "doc_id": doc_id,
+        "status": "deleting",
+        "message": "Deletion started in background. Use /ingest/delete-status/{doc_id} to check progress."
+    }
+
+
+@router.get("/delete-status/{doc_id}")
+async def get_delete_status(
+    doc_id: str,
+    auth: AuthUser = Depends(get_current_user),
+):
+    """Check the status of a background deletion."""
+    if doc_id not in _deletion_status:
+        raise HTTPException(404, detail="No deletion job found for this document")
+
+    status = _deletion_status[doc_id]
+
+    # Verify user owns this deletion job
+    if status["user_id"] != auth.id:
+        raise HTTPException(404, detail="No deletion job found for this document")
+
+    return {
+        "doc_id": doc_id,
+        "status": status["status"],
+        "error": status["error"],
+        "result": status["result"]
+    }
+
+
+async def _background_delete(doc_id: str, modality: str, user_id: str, supabase):
+    """Background task that performs the actual deletion."""
+    try:
+        if modality == "video":
+            result = await _delete_video(doc_id=doc_id, user_id=user_id, supabase=supabase)
+        else:
+            result = await _delete_regular_document(doc_id=doc_id, user_id=user_id, supabase=supabase)
+
+        _deletion_status[doc_id] = {
+            **_deletion_status[doc_id],
+            "status": "completed",
+            "result": result
+        }
+        logger.info(f"Background deletion completed for doc_id={doc_id}")
+    except Exception as e:
+        logger.error(f"Background deletion failed for doc_id={doc_id}: {e}")
+        _deletion_status[doc_id] = {
+            **_deletion_status[doc_id],
+            "status": "failed",
+            "error": str(e)
+        }
 
 
 async def _delete_regular_document(doc_id: str, user_id: str, supabase):

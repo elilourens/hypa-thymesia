@@ -299,7 +299,7 @@ async def tag_document_after_ingest(
 async def format_document_chunks_after_ingest(
     doc_id: str,
     user_id: str,
-    max_chunks: int = 100
+    max_chunks: int = 1000
 ) -> None:
     """
     Format all text chunks for a document after ingestion completes.

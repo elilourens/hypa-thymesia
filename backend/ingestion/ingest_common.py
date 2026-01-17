@@ -400,7 +400,7 @@ async def ingest_file_content(
             format_document_chunks_after_ingest(
                 doc_id=doc_id,
                 user_id=user_id,
-                max_chunks=100  # Format up to 100 chunks per document
+                max_chunks=1000  # Format up to 1000 chunks per document
             )
         )
         logger.debug("Chunk formatting task scheduled successfully")

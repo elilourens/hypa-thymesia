@@ -1,9 +1,9 @@
 """
 Batch chunk formatting service.
 Handles formatting of document chunks with Pinecone metadata updates.
+Uses the formatting microservice for actual formatting operations.
 """
 
-import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -13,7 +13,7 @@ from uuid import UUID
 from pinecone import Pinecone
 from supabase import Client
 
-from formatting.ollama_formatter import OllamaFormatter
+from formatting.formatting_client import FormattingServiceClient, get_formatting_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class BatchChunkFormatter:
         self,
         supabase: Client,
         pinecone_client: Pinecone,
-        formatter: Optional[OllamaFormatter] = None
+        formatting_client: Optional[FormattingServiceClient] = None
     ):
         """
         Initialize batch formatter.
@@ -33,11 +33,11 @@ class BatchChunkFormatter:
         Args:
             supabase: Supabase client for database operations
             pinecone_client: Pinecone client for vector operations
-            formatter: OllamaFormatter instance (creates new one if None)
+            formatting_client: FormattingServiceClient instance (uses global if None)
         """
         self.supabase = supabase
         self.pc = pinecone_client
-        self.formatter = formatter or OllamaFormatter()
+        self.formatting_client = formatting_client or get_formatting_client()
 
         # Get Pinecone index for text chunks
         text_index_name = os.getenv("PINECONE_TEXT_INDEX_NAME")
@@ -45,13 +45,13 @@ class BatchChunkFormatter:
             raise RuntimeError("PINECONE_TEXT_INDEX_NAME environment variable not set")
         self.text_index = self.pc.Index(text_index_name)
 
-        logger.info("Initialized BatchChunkFormatter")
+        logger.info("Initialized BatchChunkFormatter with microservice client")
 
     async def format_document_chunks(
         self,
         doc_id: str,
         user_id: str,
-        max_chunks: int = 100
+        max_chunks: int = 1000
     ) -> dict:
         """
         Format all text chunks for a document.
@@ -127,11 +127,10 @@ class BatchChunkFormatter:
             # 4. Mark chunks as "formatting" in database
             self._update_chunk_status(list(pinecone_data.keys()), "formatting")
 
-            # 5. Format chunks using Ollama with concurrent processing
-            # Default to OLLAMA_NUM_PARALLEL env var, or 10 as fallback
-            # Higher concurrency is needed since we're doing 1 chunk per request for reliability
-            max_concurrent = int(os.getenv("OLLAMA_NUM_PARALLEL", "10"))
-            formatted_results = await self._format_chunks_with_ollama(pinecone_data, max_concurrent=max_concurrent)
+            # 5. Format chunks via microservice with concurrent processing
+            # Default to FORMATTING_MAX_CONCURRENT env var, or 10 as fallback
+            max_concurrent = int(os.getenv("FORMATTING_MAX_CONCURRENT", "10"))
+            formatted_results = await self._format_chunks_with_microservice(pinecone_data, max_concurrent=max_concurrent)
 
             # 6. Batch update Pinecone metadata with formatted text
             if formatted_results["formatted"]:
@@ -234,40 +233,25 @@ class BatchChunkFormatter:
             logger.error(f"Failed to fetch chunks from Pinecone: {e}", exc_info=True)
             return {}
 
-    async def _format_single_chunk(self, chunk_id: str, text: str) -> tuple[str, str | None, str | None]:
-        """Format a single chunk. Returns (chunk_id, formatted_text or None, error or None)."""
-        try:
-            loop = asyncio.get_event_loop()
-            formatted_text = await loop.run_in_executor(None, self.formatter.format_chunk, text)
-            return (chunk_id, formatted_text, None if formatted_text else "Formatter returned None")
-        except Exception as e:
-            logger.error(f"Failed to format chunk {chunk_id}: {e}")
-            return (chunk_id, None, str(e))
+    async def _format_chunks_with_microservice(self, chunk_data: dict[str, str], max_concurrent: int = 10) -> dict:
+        """Format chunks via the formatting microservice. Returns dict with 'formatted' and 'failed' lists."""
+        logger.info(f"Formatting {len(chunk_data)} chunks via microservice (max {max_concurrent} concurrent)")
 
-    async def _format_chunks_with_ollama(self, chunk_data: dict[str, str], max_concurrent: int = 10) -> dict:
-        """Format chunks with concurrent processing. Returns dict with 'formatted' and 'failed' lists."""
-        logger.info(f"Formatting {len(chunk_data)} chunks (max {max_concurrent} concurrent)")
-
-        # Create bounded tasks
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def bounded_format(chunk_id, text):
-            async with semaphore:
-                return await self._format_single_chunk(chunk_id, text)
-
-        # Execute all tasks
-        results = await asyncio.gather(*[
-            bounded_format(chunk_id, text)
+        # Convert to list format expected by microservice
+        chunks_list = [
+            {"chunk_id": chunk_id, "text": text}
             for chunk_id, text in chunk_data.items()
-        ])
+        ]
 
-        # Separate successful and failed
-        formatted = [(cid, txt) for cid, txt, err in results if txt]
-        failed = [(cid, err or "Unknown error") for cid, txt, err in results if not txt]
+        # Call microservice batch endpoint
+        result = await self.formatting_client.batch_format_chunks(
+            chunks=chunks_list,
+            max_concurrent=max_concurrent
+        )
 
-        logger.info(f"Formatting complete: {len(formatted)} succeeded, {len(failed)} failed")
+        logger.info(f"Formatting complete: {len(result['formatted'])} succeeded, {len(result['failed'])} failed")
 
-        return {"formatted": formatted, "failed": failed}
+        return result
 
     def _batch_update_pinecone_metadata(
         self,
@@ -443,3 +427,4 @@ class BatchChunkFormatter:
             }).eq("chunk_id", chunk_id).execute()
         except Exception as e:
             logger.error(f"Failed to mark chunk {chunk_id} as failed: {e}")
+ 

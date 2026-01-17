@@ -19,7 +19,7 @@ router = APIRouter(prefix="/formatting", tags=["formatting"])
 class FormatDocumentRequest(BaseModel):
     """Request to format all chunks for a document."""
     doc_id: str
-    max_chunks: Optional[int] = 100
+    max_chunks: Optional[int] = 1000
 
 
 class FormatDocumentResponse(BaseModel):
@@ -91,7 +91,7 @@ class BatchFormatRequest(BaseModel):
     """Request to format multiple documents."""
     group_id: Optional[str] = None
     max_documents: Optional[int] = 10
-    max_chunks_per_doc: Optional[int] = 100
+    max_chunks_per_doc: Optional[int] = 1000
     only_unformatted: bool = True
 
 
