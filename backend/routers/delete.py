@@ -121,10 +121,14 @@ async def _background_delete(doc_id: str, modality: str, user_id: str, supabase)
 
 
 async def _delete_regular_document(doc_id: str, user_id: str, supabase):
-    """Delete a regular document (text/image)."""
-    user_id = user_id
+    """Delete a regular document (text/image).
 
-    # Get all chunks and their vector registrations
+    Uses database cascade delete to automatically clean up:
+    - app_chunks (cascades from app_doc_meta)
+    - app_vector_registry (cascades from app_chunks)
+    - app_image_tags (cascades from both app_chunks and app_doc_meta)
+    """
+    # Get all chunks and their vector registrations to handle external cleanup
     q = (supabase
         .table("app_vector_registry")
         .select("vector_id,app_chunks!inner(bucket,storage_path,modality)")
@@ -167,16 +171,26 @@ async def _delete_regular_document(doc_id: str, user_id: str, supabase):
     if extracted_image_ids:
         delete_vectors_by_ids(ids=extracted_image_ids, modality="extracted_image", namespace=user_id)
 
-    # Delete files from Supabase storage (all buckets)
+    # Delete files from Supabase storage - batch by bucket for efficiency
     deleted_files = 0
+    files_by_bucket: Dict[str, list] = {}
     for bucket, path in files:
-        try:
-            supabase.storage.from_(bucket).remove([path])
-            deleted_files += 1
-        except Exception as e:
-            logger.error(f"Storage delete failed for {bucket}/{path}: {e}")
+        if bucket not in files_by_bucket:
+            files_by_bucket[bucket] = []
+        files_by_bucket[bucket].append(path)
 
-    # Delete from database (cascades to app_chunks and app_vector_registry)
+    for bucket, paths in files_by_bucket.items():
+        try:
+            supabase.storage.from_(bucket).remove(paths)
+            deleted_files += len(paths)
+            logger.info(f"Deleted {len(paths)} files from {bucket}")
+        except Exception as e:
+            logger.error(f"Storage delete failed for {bucket}: {e}")
+
+    # Delete from database - cascade delete automatically handles:
+    # - app_chunks (via fk_chunks_doc with ON DELETE CASCADE)
+    # - app_vector_registry (via fk_registry_chunk with ON DELETE CASCADE)
+    # - app_image_tags (via fk_chunk and fk_doc with ON DELETE CASCADE)
     supabase.table("app_doc_meta").delete().eq(
         "doc_id", doc_id
     ).eq("user_id", user_id).execute()
@@ -195,7 +209,13 @@ async def _delete_regular_document(doc_id: str, user_id: str, supabase):
 
 
 async def _delete_video(doc_id: str, user_id: str, supabase):
-    """Delete a video and all associated data."""
+    """Delete a video and all associated data.
+
+    Uses database cascade delete to automatically clean up:
+    - app_chunks (cascades from app_doc_meta)
+    - app_vector_registry (cascades from app_chunks)
+    - app_image_tags (cascades from both app_chunks and app_doc_meta)
+    """
 
     # Import here to avoid circular dependency
     try:
@@ -252,17 +272,26 @@ async def _delete_video(doc_id: str, user_id: str, supabase):
     except Exception as e:
         logger.error(f"Error deleting video transcript vectors: {e}")
 
-    # Delete storage files
+    # Delete storage files - batch by bucket for efficiency
     deleted_files = 0
+    files_by_bucket: Dict[str, list] = {}
     for bucket, path in storage_files:
-        try:
-            supabase.storage.from_(bucket).remove([path])
-            deleted_files += 1
-            logger.info(f"Deleted storage file: {bucket}/{path}")
-        except Exception as e:
-            logger.error(f"Storage delete failed for {bucket}/{path}: {e}")
+        if bucket not in files_by_bucket:
+            files_by_bucket[bucket] = []
+        files_by_bucket[bucket].append(path)
 
-    # Delete app_doc_meta record (cascades to app_chunks automatically)
+    for bucket, paths in files_by_bucket.items():
+        try:
+            supabase.storage.from_(bucket).remove(paths)
+            deleted_files += len(paths)
+            logger.info(f"Deleted {len(paths)} files from {bucket}")
+        except Exception as e:
+            logger.error(f"Storage delete failed for {bucket}: {e}")
+
+    # Delete app_doc_meta record - cascade delete automatically handles:
+    # - app_chunks (via fk_chunks_doc with ON DELETE CASCADE)
+    # - app_vector_registry (via fk_registry_chunk with ON DELETE CASCADE)
+    # - app_image_tags (via fk_chunk and fk_doc with ON DELETE CASCADE)
     supabase.table("app_doc_meta").delete().eq(
         "doc_id", doc_id
     ).eq("user_id", user_id).execute()
