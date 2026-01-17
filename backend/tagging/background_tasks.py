@@ -1,17 +1,43 @@
 """
 Background task utilities for async image and document tagging, and chunk formatting.
+
+Now uses the microservice for all tagging operations instead of local models.
 """
 
 import asyncio
 import logging
+import os
 from typing import List, Optional
 
-from tagging.tag_pipeline import tag_image
-from tagging.document_tagger import get_document_tagger
 from core.deps import get_supabase
 
-
 logger = logging.getLogger(__name__)
+
+
+# Check if we should use microservice or local taggers
+USE_TAGGING_MICROSERVICE = os.getenv("USE_TAGGING_MICROSERVICE", "true").lower() == "true"
+
+
+def _get_image_tagger():
+    """Get the appropriate image tagger based on configuration."""
+    if USE_TAGGING_MICROSERVICE:
+        from tagging.tagging_client import MicroserviceImageTagger
+        return MicroserviceImageTagger()
+    else:
+        # Fall back to local tagger (requires models to be loaded locally)
+        from tagging.tag_pipeline import tag_image
+        return tag_image
+
+
+def _get_document_tagger():
+    """Get the appropriate document tagger based on configuration."""
+    if USE_TAGGING_MICROSERVICE:
+        from tagging.tagging_client import MicroserviceDocumentTagger
+        return MicroserviceDocumentTagger()
+    else:
+        # Fall back to local tagger
+        from tagging.document_tagger import get_document_tagger
+        return get_document_tagger()
 
 
 async def tag_image_background(
@@ -46,22 +72,39 @@ async def tag_image_background(
             logger.error(f"Failed to download image {storage_path} from bucket {bucket}: {e}")
             return
 
-        # Run tagging pipeline with lower thresholds for better recall
-        result = await tag_image(
-            chunk_id=chunk_id,
-            image_embedding=image_embedding,
-            image_bytes=image_bytes,
-            user_id=user_id,
-            doc_id=doc_id,
-            clip_min_confidence=0.15,  # Lower threshold to get more candidates for OWL-ViT
-            owlvit_min_confidence=0.15,  # Lower threshold for OWL-ViT
-            store_candidates=False  # Only store OWL-ViT verified tags
-        )
+        if USE_TAGGING_MICROSERVICE:
+            # Use microservice
+            tagger = _get_image_tagger()
+            result = await tagger.tag_image(
+                chunk_id=chunk_id,
+                image_embedding=image_embedding,
+                image_bytes=image_bytes,
+                user_id=user_id,
+                doc_id=doc_id,
+                clip_min_confidence=0.15,
+                owlvit_min_confidence=0.15,
+                store_candidates=False
+            )
+        else:
+            # Use local tagger
+            from tagging.tag_pipeline import tag_image
+            result = await tag_image(
+                chunk_id=chunk_id,
+                image_embedding=image_embedding,
+                image_bytes=image_bytes,
+                user_id=user_id,
+                doc_id=doc_id,
+                clip_min_confidence=0.15,
+                owlvit_min_confidence=0.15,
+                store_candidates=False
+            )
+
+        verified_count = len(result.get('verified_tags', []))
+        processing_time = result.get('processing_time_ms', 0)
 
         logger.info(
             f"Tagging complete for chunk_id={chunk_id}: "
-            f"{len(result['verified_tags'])} verified tags in "
-            f"{result['processing_time_ms']:.0f}ms"
+            f"{verified_count} verified tags in {processing_time:.0f}ms"
         )
 
     except Exception as e:
@@ -107,21 +150,38 @@ async def tag_uploaded_image_after_ingest(
         chunk = chunk_result.data[0]
         chunk_id = chunk["chunk_id"]
 
-        # Run tagging pipeline with lower thresholds for better recall
-        result = await tag_image(
-            chunk_id=chunk_id,
-            image_embedding=image_embedding,
-            image_bytes=file_bytes,
-            user_id=user_id,
-            doc_id=doc_id,
-            clip_min_confidence=0.15,  # Lowered from default 0.3
-            owlvit_min_confidence=0.15,  # Lowered from default 0.7 for testing
-            store_candidates=False
-        )
+        if USE_TAGGING_MICROSERVICE:
+            # Use microservice
+            tagger = _get_image_tagger()
+            result = await tagger.tag_image(
+                chunk_id=chunk_id,
+                image_embedding=image_embedding,
+                image_bytes=file_bytes,
+                user_id=user_id,
+                doc_id=doc_id,
+                clip_min_confidence=0.15,
+                owlvit_min_confidence=0.15,
+                store_candidates=False
+            )
+        else:
+            # Use local tagger
+            from tagging.tag_pipeline import tag_image
+            result = await tag_image(
+                chunk_id=chunk_id,
+                image_embedding=image_embedding,
+                image_bytes=file_bytes,
+                user_id=user_id,
+                doc_id=doc_id,
+                clip_min_confidence=0.15,
+                owlvit_min_confidence=0.15,
+                store_candidates=False
+            )
+
+        verified_count = len(result.get('verified_tags', []))
 
         logger.info(
             f"Post-upload tagging complete for doc_id={doc_id}: "
-            f"{len(result['verified_tags'])} verified tags"
+            f"{verified_count} verified tags"
         )
 
     except Exception as e:
@@ -148,31 +208,31 @@ async def tag_document_background(
     try:
         logger.info(f"Starting background document tagging for chunk_id={chunk_id}")
 
-        # Get document tagger
-        tagger = get_document_tagger()
+        tagger = _get_document_tagger()
 
         # Run tagging pipeline
         result = await tagger.tag_document(
             text_content=text_content,
             filename=filename,
-            min_confidence=0.5  # Only store tags with 50%+ confidence
+            min_confidence=0.5
         )
 
-        if "error" in result:
-            logger.error(f"Document tagging failed for chunk_id={chunk_id}: {result['error']}")
+        if not result.get("success", True) or "error" in result:
+            logger.error(f"Document tagging failed for chunk_id={chunk_id}: {result.get('error')}")
             return
 
         # Store tags in database
         stored_count = await tagger.store_document_tags(
-            chunk_id=chunk_id,
-            doc_id=doc_id,
+            doc_id=doc_id,  # Note: using doc_id for document-level tags
             user_id=user_id,
             tags=result["tags"]
         )
 
+        processing_time = result.get('processing_time_ms', 0)
+
         logger.info(
             f"Document tagging complete for chunk_id={chunk_id}: "
-            f"{stored_count} tags stored in {result['processing_time_ms']:.0f}ms"
+            f"{stored_count} tags stored in {processing_time:.0f}ms"
         )
 
     except Exception as e:
@@ -267,7 +327,7 @@ async def tag_document_after_ingest(
         logger.info(f"Combined document text: {len(full_document_text)} characters")
 
         # Get document tagger
-        tagger = get_document_tagger()
+        tagger = _get_document_tagger()
 
         # Run tagging pipeline on the FULL document (not per chunk)
         result = await tagger.tag_document(
@@ -276,8 +336,8 @@ async def tag_document_after_ingest(
             min_confidence=0.5
         )
 
-        if "error" in result:
-            logger.error(f"Document tagging failed for doc_id={doc_id}: {result['error']}")
+        if not result.get("success", True) or "error" in result:
+            logger.error(f"Document tagging failed for doc_id={doc_id}: {result.get('error')}")
             return
 
         # Store tags ONCE for the entire document (not per chunk!)
@@ -287,9 +347,11 @@ async def tag_document_after_ingest(
             tags=result["tags"]
         )
 
+        preview_chars = result.get('preview_chars', 0)
+
         logger.info(
             f"Document tagging complete for doc_id={doc_id}: "
-            f"{stored_count} tags stored (analyzed {result['preview_chars']} chars)"
+            f"{stored_count} tags stored (analyzed {preview_chars} chars)"
         )
 
     except Exception as e:
@@ -310,7 +372,7 @@ async def format_document_chunks_after_ingest(
     Args:
         doc_id: Document ID
         user_id: User ID
-        max_chunks: Maximum chunks to format in this batch (default: 100)
+        max_chunks: Maximum chunks to format in this batch (default: 1000)
     """
     try:
         logger.info(f"Starting background chunk formatting for doc_id={doc_id}")
