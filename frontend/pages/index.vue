@@ -254,6 +254,7 @@ onMounted(() => {
     <span class="file-type">JPEG</span>
     <span class="file-type">PNG</span>
     <span class="file-type">PPT</span>
+    <span class="file-type">MP4</span>
   </UMarquee>
 </BodyCard>
 

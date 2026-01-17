@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_FILES = 50  # Free tier default
 PREMIUM_MAX_FILES = 100  # Premium tier (£2.99/month)
+MINUTES_PER_TOKEN = 5  # 5 minutes of video = 1 file token
 
 
 def get_user_max_files(supabase, user_id: str) -> int:
@@ -53,23 +54,104 @@ def get_user_max_files(supabase, user_id: str) -> int:
         return DEFAULT_MAX_FILES
 
 
+def calculate_video_tokens(duration_seconds: float) -> int:
+    """
+    Calculate the number of file tokens a video consumes based on its duration.
+
+    Args:
+        duration_seconds: Video duration in seconds
+
+    Returns:
+        Number of file tokens (minimum 1)
+    """
+    import math
+    if duration_seconds <= 0:
+        return 1
+    return max(1, math.ceil(duration_seconds / (MINUTES_PER_TOKEN * 60)))
+
+
 def get_user_file_count(supabase, user_id: str) -> int:
     """
-    Get the current number of files (documents) a user has uploaded.
+    Get the current number of file tokens a user has consumed.
+    This replaces simple file counting with token-based counting.
+
+    For videos: tokens are calculated based on duration (5 minutes = 1 token)
+    For other files: 1 token per file (default)
 
     Args:
         supabase: Supabase client
         user_id: User ID to check
 
     Returns:
-        Number of documents the user currently has
+        Total number of file tokens the user has consumed
     """
     try:
-        response = supabase.table("app_doc_meta").select("doc_id", count="exact").eq("user_id", user_id).execute()
-        return response.count or 0
+        # Query all documents and sum their file_tokens
+        response = supabase.table("app_doc_meta").select("file_tokens").eq("user_id", user_id).execute()
+
+        if not response.data:
+            return 0
+
+        # Sum all file_tokens (default is 1 per file, higher for long videos)
+        total_tokens = sum(doc.get("file_tokens", 1) for doc in response.data)
+        return total_tokens
     except Exception as e:
-        logger.error(f"Error counting user files: {e}")
+        logger.error(f"Error counting user file tokens: {e}")
         return 0
+
+
+def check_user_can_upload_video(supabase, user_id: str, duration_seconds: float) -> dict:
+    """
+    Check if a user can upload a video based on its duration and their token limit.
+
+    Args:
+        supabase: Supabase client
+        user_id: User ID to check
+        duration_seconds: Duration of the video in seconds
+
+    Returns:
+        Dict with can_upload (bool), current_count (int), max_files (int),
+        tokens_needed (int), remaining (int)
+
+    Raises:
+        HTTPException: 403 if user doesn't have enough tokens remaining
+    """
+    current_count = get_user_file_count(supabase, user_id)
+    max_files = get_user_max_files(supabase, user_id)
+    tokens_needed = calculate_video_tokens(duration_seconds)
+
+    can_upload = (current_count + tokens_needed) <= max_files
+    remaining = max(0, max_files - current_count)
+
+    if not can_upload:
+        # User doesn't have enough tokens
+        message = (
+            f"This video requires {tokens_needed} file token(s) ({duration_seconds / 60:.1f} minutes), "
+            f"but you only have {remaining} token(s) remaining. "
+            f"Your current usage is {current_count}/{max_files} tokens. "
+            f"Please delete some files or upgrade to premium to upload this video."
+        )
+
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "file_limit_reached",
+                "message": message,
+                "current_count": current_count,
+                "max_files": max_files,
+                "tokens_needed": tokens_needed,
+                "remaining": remaining,
+                "over_limit": tokens_needed - remaining
+            }
+        )
+
+    return {
+        "can_upload": True,
+        "current_count": current_count,
+        "max_files": max_files,
+        "tokens_needed": tokens_needed,
+        "remaining": remaining
+    }
 
 
 def check_user_can_upload(supabase, user_id: str) -> dict:

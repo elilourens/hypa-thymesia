@@ -66,11 +66,21 @@ async def process_video_background(
             response.raise_for_status()
             result = response.json()
 
+        # Calculate file tokens based on video duration (5 minutes = 1 token)
+        duration_seconds = result.get("duration_seconds", 0)
+        import math
+        MINUTES_PER_TOKEN = 5
+        file_tokens = max(1, math.ceil(duration_seconds / (MINUTES_PER_TOKEN * 60)))
+
+        logger.info(f"Video duration: {duration_seconds:.2f}s, calculated tokens: {file_tokens}")
+
         # Update status to completed
         supabase.table("app_doc_meta").update({
             "processing_status": "completed",
             "text_chunks_count": result.get("transcript_chunks_count", 0),
             "images_count": result.get("frame_count", 0),
+            "duration_seconds": duration_seconds,
+            "file_tokens": file_tokens,
         }).eq("doc_id", doc_id).execute()
 
         logger.info(f"Background video processing completed: {filename} (doc_id={doc_id})")

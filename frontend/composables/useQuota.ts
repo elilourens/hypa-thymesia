@@ -28,6 +28,16 @@ export function useQuota() {
   }
 
   /**
+   * Calculate file tokens needed for a video based on duration
+   * 5 minutes = 1 token
+   */
+  function calculateVideoTokens(durationSeconds: number): number {
+    const MINUTES_PER_TOKEN = 5
+    if (durationSeconds <= 0) return 1
+    return Math.max(1, Math.ceil(durationSeconds / (MINUTES_PER_TOKEN * 60)))
+  }
+
+  /**
    * Get user's current file quota information
    */
   async function getQuota(): Promise<QuotaInfo> {
@@ -107,5 +117,6 @@ export function useQuota() {
     updateMaxFiles,
     isQuotaError,
     getQuotaFromError,
+    calculateVideoTokens,
   }
 }

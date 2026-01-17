@@ -93,7 +93,10 @@ onMounted(() => {
             {{ quotaInfo.current_count }}
           </div>
           <div class="text-base text-zinc-400">
-            of {{ quotaInfo.max_files }} files
+            of {{ quotaInfo.max_files }} file tokens
+          </div>
+          <div class="text-xs text-zinc-500 mt-1">
+            (Videos: 5 min = 1 token, Other files: 1 token each)
           </div>
         </div>
 
@@ -110,10 +113,10 @@ onMounted(() => {
             'text-zinc-400': !quotaInfo.is_over_limit && quotaInfo.remaining > 10
           }">
             <template v-if="quotaInfo.is_over_limit">
-              {{ quotaInfo.over_limit }} files over limit
+              {{ quotaInfo.over_limit }} tokens over limit
             </template>
             <template v-else>
-              {{ quotaInfo.remaining }} files remaining
+              {{ quotaInfo.remaining }} tokens remaining
             </template>
           </span>
         </div>

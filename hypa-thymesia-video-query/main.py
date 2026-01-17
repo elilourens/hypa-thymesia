@@ -114,6 +114,7 @@ class VideoUploadResponse(BaseModel):
     video_id: str
     frame_count: int
     transcript_chunks_count: int
+    duration_seconds: float
     message: str
 
 
@@ -233,6 +234,10 @@ async def upload_video(
         # Initialize databases
         frame_db = VideoFrameDatabase(user_id=user_id)
         transcript_db = TranscriptDatabase(user_id=user_id)
+
+        # Get video duration
+        duration_seconds = audio_processor.get_video_duration(temp_video_path)
+        logger.info(f"Video duration: {duration_seconds:.2f} seconds")
 
         # Process video frames
         logger.info("Extracting frames from video...")
@@ -466,6 +471,7 @@ async def upload_video(
             video_id=video_id,
             frame_count=len(frames),
             transcript_chunks_count=transcript_count,
+            duration_seconds=duration_seconds,
             message="Video processed successfully",
         )
 

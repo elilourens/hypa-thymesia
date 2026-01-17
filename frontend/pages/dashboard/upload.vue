@@ -10,7 +10,7 @@ import OneDriveLinkCard from '@/components/OneDriveLinkCard.vue'
 
 const { uploadFile, uploadVideo, pollProcessingStatus } = useIngest()
 const { createGroup } = useGroupsApi()
-const { isQuotaError, getQuotaFromError } = useQuota()
+const { isQuotaError, getQuotaFromError, calculateVideoTokens } = useQuota()
 
 // UI state
 const files = ref<File[]>([])
@@ -82,6 +82,46 @@ function isVideoFile(file: File): boolean {
   const ext = file.name.split('.').pop()?.toLowerCase()
   return ['mp4', 'avi', 'mov', 'mkv', 'webm'].includes(ext || '')
 }
+
+// Get video duration from file
+async function getVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+
+    video.onloadedmetadata = () => {
+      window.URL.revokeObjectURL(video.src)
+      resolve(video.duration)
+    }
+
+    video.onerror = () => {
+      window.URL.revokeObjectURL(video.src)
+      resolve(0) // Return 0 if we can't get duration
+    }
+
+    video.src = URL.createObjectURL(file)
+  })
+}
+
+// Calculate total tokens for selected files
+const totalTokensNeeded = ref(0)
+watch(files, async (newFiles) => {
+  if (!newFiles.length) {
+    totalTokensNeeded.value = 0
+    return
+  }
+
+  let total = 0
+  for (const file of newFiles) {
+    if (isVideoFile(file)) {
+      const duration = await getVideoDuration(file)
+      total += calculateVideoTokens(duration)
+    } else {
+      total += 1 // Regular files are 1 token
+    }
+  }
+  totalTokensNeeded.value = total
+}, { immediate: true })
 
 async function doUpload(): Promise<void> {
   error.value = null
@@ -210,7 +250,7 @@ async function doUpload(): Promise<void> {
           layout="list"
           description="PDF, DOCX, PPT, PPTX, TXT, PNG, JPG, MP4, AVI, MOV"
           class="w-96 min-h-48"
-          accept=".pdf,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.mp4,.avi,.mov,.mkv,.webm"
+          accept=".pdf,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.mp4"
         />
       </div>
 
@@ -270,9 +310,12 @@ async function doUpload(): Promise<void> {
             <UButton :disabled="!canUpload" @click="doUpload">
               {{ uploading ? 'Uploading…' : 'Upload' }}
             </UButton>
-            <span v-if="files.length" class="text-xs text-gray-500">
-              {{ files.length }} file{{ files.length === 1 ? '' : 's' }} selected
-            </span>
+            <div v-if="files.length" class="text-xs text-gray-500">
+              <div>{{ files.length }} file{{ files.length === 1 ? '' : 's' }} selected</div>
+              <div v-if="totalTokensNeeded > 0" class="text-xs font-medium">
+                Will use {{ totalTokensNeeded }} token{{ totalTokensNeeded === 1 ? '' : 's' }}
+              </div>
+            </div>
           </div>
 
           <!-- Messages -->
