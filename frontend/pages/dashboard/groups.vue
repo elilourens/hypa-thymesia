@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, h, resolveComponent } from 'vue'   
+import { ref, reactive, onMounted, h, resolveComponent } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useGroupsApi, type Group } from '@/composables/useGroups'
 import BodyCard from '@/components/BodyCard.vue';
@@ -8,33 +8,28 @@ const { listGroups, createGroup, deleteGroup } = useGroupsApi()
 
 const UButton = resolveComponent('UButton')
 const UInput = resolveComponent('UInput')
-const UDropdownMenu = resolveComponent('UDropdownMenu')
-const UBadge = resolveComponent('UBadge')
 
 const groups = ref<Group[]>([])
+const total = ref(0)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const pagination = reactive({ pageIndex: 0, pageSize: 15 })
 
 const newName = ref('')
-const newSortIndex = ref<number | null>(0)
 const creating = ref(false)
 
 const deletingIds = ref<Set<string>>(new Set())
 const toast = useToast()
 
-const sorted = computed(() =>
-  [...groups.value].sort(
-    (a, b) =>
-      (a.sort_index ?? 0) - (b.sort_index ?? 0) ||
-      (a.name || '').localeCompare(b.name || '')
-  )
-)
-
 async function refresh() {
   loading.value = true
   error.value = null
   try {
-    groups.value = await listGroups()
+    const allGroups = await listGroups()
+    total.value = allGroups.length
+    // Simple client-side pagination for groups
+    const start = pagination.pageIndex * pagination.pageSize
+    groups.value = allGroups.slice(start, start + pagination.pageSize)
   } catch (e: any) {
     error.value = e?.message || 'Failed to load groups'
   } finally {
@@ -50,10 +45,10 @@ async function onCreate() {
   }
   creating.value = true
   try {
-    const g = await createGroup(name, Number.isFinite(newSortIndex.value ?? NaN) ? (newSortIndex.value as number) : 0)
-    groups.value = [g, ...groups.value]
+    await createGroup(name)
     newName.value = ''
-    // keep current sort_index for next create; no reset
+    pagination.pageIndex = 0
+    await refresh()
     toast.add({ title: 'Group created', color: 'success', icon: 'i-lucide-check' })
   } catch (e: any) {
     toast.add({ title: e?.message ?? 'Create failed', color: 'error', icon: 'i-lucide-alert-triangle' })
@@ -67,9 +62,13 @@ async function onDelete(id: string) {
   deletingIds.value.add(id)
   try {
     await deleteGroup(id)
-    const before = groups.value.length
     groups.value = groups.value.filter(g => g.id !== id)
-    if (before && groups.value.length === 0) {
+    total.value = Math.max(0, total.value - 1)
+
+    if (groups.value.length === 0 && pagination.pageIndex > 0) {
+      pagination.pageIndex -= 1
+      await refresh()
+    } else {
       await refresh()
     }
     toast.add({ title: 'Group deleted', color: 'success', icon: 'i-lucide-trash-2' })
@@ -90,12 +89,6 @@ const columns: TableColumn<Group>[] = [
     cell: ({ row }) => row.original.name || '(unnamed)'
   },
   {
-    accessorKey: 'sort_index',
-    header: 'Order',
-    cell: ({ row }) =>
-      h(UBadge, { variant: 'subtle' }, () => String(row.original.sort_index ?? 0))
-  },
-  {
     accessorKey: 'created_at',
     header: 'Created',
     cell: ({ row }) => {
@@ -109,39 +102,28 @@ const columns: TableColumn<Group>[] = [
   {
     id: 'actions',
     enableHiding: false,
-    cell: ({ row }) => {
-      const id = row.original.id
-      const items = [
-        { type: 'label', label: 'Actions' },
-        {
-          label: deletingIds.value.has(id) ? 'Deleting…' : 'Delete',
-          disabled: deletingIds.value.has(id),
-          icon: 'i-lucide-trash-2',
-          onSelect: () => onDelete(id)
-        }
-      ]
-      return h(
-        UDropdownMenu,
-        { items, content: { align: 'end' } },
-        () => h(UButton, {
-          icon: 'i-lucide-ellipsis-vertical',
-          color: 'neutral',
-          variant: 'ghost',
-          'aria-label': 'Actions'
-        })
-      )
-    }
+    cell: ({ row }) =>
+      h(UButton, {
+        color: 'error',
+        variant: 'ghost',
+        size: 'sm',
+        icon: 'i-lucide-trash-2',
+        loading: deletingIds.value.has(row.original.id),
+        disabled: deletingIds.value.has(row.original.id),
+        onClick: () => onDelete(row.original.id),
+        'aria-label': 'Delete group'
+      })
   }
 ]
 </script>
 
 <template>
   <BodyCard>
-    <div class=" w-full mx-auto">
+    <div class="w-full mx-auto">
       <div class="flex items-center justify-between px-4 py-4">
         <h1 class="text-lg font-semibold">Groups</h1>
         <div class="text-sm text-muted">
-          Total: {{ groups.length.toLocaleString() }}
+          Total: {{ total.toLocaleString() }}
         </div>
       </div>
 
@@ -153,12 +135,6 @@ const columns: TableColumn<Group>[] = [
             placeholder="New group name…"
             class="w-64"
           />
-          <UInput
-            v-model.number="newSortIndex"
-            type="number"
-            placeholder="Order (sort_index)"
-            class="w-40"
-          />
           <UButton
             :loading="creating"
             :disabled="creating || !newName.trim()"
@@ -168,14 +144,11 @@ const columns: TableColumn<Group>[] = [
             Create group
           </UButton>
         </div>
-        <p class="mt-2 text-xs text-muted">
-          Groups are ordered by <code>sort_index</code> then name.
-        </p>
       </div>
 
       <!-- List -->
       <UTable
-        :data="sorted"
+        :data="groups"
         :columns="columns"
         :loading="loading"
         sticky
@@ -191,6 +164,17 @@ const columns: TableColumn<Group>[] = [
         </template>
       </UTable>
 
+      <!-- Footer with pagination -->
+      <div class="flex items-center justify-between px-4 py-3.5 border-t border-accented text-sm text-muted">
+        <div>Page {{ pagination.pageIndex + 1 }} • Showing {{ groups.length }} / {{ total.toLocaleString() }}</div>
+        <UPagination
+          :default-page="pagination.pageIndex + 1"
+          :items-per-page="pagination.pageSize"
+          :total="total"
+          @update:page="(p: number) => (pagination.pageIndex = p - 1, refresh())"
+        />
+      </div>
+
       <UAlert
         v-if="error"
         icon="i-heroicons-exclamation-triangle"
@@ -201,5 +185,4 @@ const columns: TableColumn<Group>[] = [
       />
     </div>
   </BodyCard>
-  
 </template>

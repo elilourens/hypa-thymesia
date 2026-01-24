@@ -10,6 +10,8 @@ interface SubscriptionStatus {
 }
 
 export const useStripe = () => {
+  const config = useRuntimeConfig()
+  const API_BASE = config.public.apiBase ?? 'http://127.0.0.1:8000/api/v1'
   const loading = ref(false)
   const error = ref<string | null>(null)
   const subscriptionStatus = ref<SubscriptionStatus | null>(null)
@@ -22,7 +24,7 @@ export const useStripe = () => {
       loading.value = true
       error.value = null
 
-      const response = await fetch('http://localhost:8000/api/v1/stripe/subscription-status', {
+      const response = await fetch(`${API_BASE}/stripe/subscription-status`, {
         headers: {
           'Authorization': `Bearer ${supabaseAccessToken}`,
           'Content-Type': 'application/json'
@@ -54,15 +56,15 @@ export const useStripe = () => {
       error.value = null
 
       // Create checkout session
-      const response = await fetch('http://localhost:8000/api/v1/stripe/create-checkout-session', {
+      const response = await fetch(`${API_BASE}/stripe/create-checkout-session`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${supabaseAccessToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          success_url: `${window.location.origin}/dashboard/account?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${window.location.origin}/dashboard/account?canceled=true`
+          success_url: `${window.location.origin}/dashboard/upload?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${window.location.origin}/dashboard/upload?canceled=true`
         })
       })
 
@@ -90,7 +92,7 @@ export const useStripe = () => {
       loading.value = true
       error.value = null
 
-      const response = await fetch('http://localhost:8000/api/v1/stripe/cancel-subscription', {
+      const response = await fetch(`${API_BASE}/stripe/cancel-subscription`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${supabaseAccessToken}`,

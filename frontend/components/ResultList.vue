@@ -58,22 +58,44 @@ function isShowingFormatted(r: any): boolean {
   return true
 }
 
+// Strip filename from the beginning of text
+function stripFilename(text: string | undefined, filename?: string): string {
+  if (!text || !filename) return text || ''
+
+  const lines = text.split('\n')
+  // Remove lines that contain just the filename or the filename without extension
+  const filenameWithoutExt = filename.replace(/\.[^/.]+$/, '')
+
+  while (lines.length > 0) {
+    const firstLine = lines[0].trim()
+    if (firstLine === filename || firstLine === filenameWithoutExt || firstLine === filename.replace(/\.pdf$/, '')) {
+      lines.shift()
+    } else {
+      break
+    }
+  }
+
+  return lines.join('\n').trim()
+}
+
 // Get the text to display based on toggle state
 function getDisplayText(r: any): string {
   const hasFormatted = r.metadata?.is_formatted && r.metadata?.formatted_text
+  let text = ''
 
   // If no formatted text available, always show original
   if (!hasFormatted) {
-    return r.metadata?.text || ''
+    text = r.metadata?.text || ''
+  } else if (isShowingFormatted(r)) {
+    // If showing formatted (default), return formatted_text
+    text = r.metadata?.formatted_text || r.metadata?.text || ''
+  } else {
+    // Otherwise show original
+    text = r.metadata?.original_text || r.metadata?.text || ''
   }
 
-  // If showing formatted (default), return formatted_text
-  if (isShowingFormatted(r)) {
-    return r.metadata?.formatted_text || r.metadata?.text || ''
-  }
-
-  // Otherwise show original
-  return r.metadata?.original_text || r.metadata?.text || ''
+  // Strip filename from beginning
+  return stripFilename(text, r.metadata?.title)
 }
 
 // ========== Utility Functions ==========
@@ -87,13 +109,23 @@ function buildDeepLink(baseUrl: string, r: any) {
   const mime = r.metadata?.mime_type || ''
 
   // PDF deep linking (PowerPoint is stored as PDF, so this works for both)
-  if (mime.includes('application/pdf') && r.metadata?.page_number) {
-    return `${baseUrl}#page=${r.metadata.page_number}`
+  if (mime.includes('application/pdf')) {
+    // Use start_page from search results, or fall back to page_number
+    const pageNumber = r.metadata?.start_page || r.metadata?.page_number
+    if (pageNumber) {
+      return `${baseUrl}#page=${pageNumber}`
+    }
   }
 
-  // DOCX viewer
+  // DOCX viewer with page support
   if (mime.includes('officedocument.wordprocessingml.document')) {
-    return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(baseUrl)}`
+    const pageNumber = r.metadata?.start_page || r.metadata?.page_number
+    const viewerUrl = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(baseUrl)}`
+    // Office viewer supports #page parameter
+    if (pageNumber) {
+      return `${viewerUrl}#page=${pageNumber}`
+    }
+    return viewerUrl
   }
 
   return baseUrl
@@ -106,17 +138,32 @@ async function handleOpen(r: any) {
     // For PowerPoint files that have been converted to PDF, use the converted PDF for viewing
     let bucket = r.metadata.bucket
     let storagePath = r.metadata.storage_path
+    let mime = r.metadata.mime_type || ''
 
     if (r.metadata.converted_pdf_path) {
       // Use the converted PDF for viewing (better browser support)
       bucket = 'texts' // Converted PDFs are stored in the texts bucket
       storagePath = r.metadata.converted_pdf_path
+      mime = 'application/pdf' // Converted PDFs are always PDFs
+    }
+
+    // Infer mime type from title if not set
+    if (!mime && r.metadata?.title) {
+      const title = r.metadata.title
+      if (title.endsWith('.pdf')) {
+        mime = 'application/pdf'
+      } else if (title.endsWith('.docx') || title.endsWith('.doc')) {
+        mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      }
     }
 
     // Pass download=false to display inline in browser
     const url = await getSignedUrl(bucket, storagePath, false)
     if (!url) throw new Error('No URL returned')
-    window.open(buildDeepLink(url, r), '_blank')
+
+    // Create a modified result object with the inferred mime type
+    const resultForDeepLink = { ...r, metadata: { ...r.metadata, mime_type: mime } }
+    window.open(buildDeepLink(url, resultForDeepLink), '_blank')
   } catch (err: any) {
     toast.add({
       title: 'Could not open file',
@@ -349,30 +396,25 @@ watch(
 <template>
   <div
     v-if="results?.length"
-    class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4"
+    class="grid gap-4"
+    style="grid-template-columns: repeat(auto-fit, minmax(550px, 1fr))"
   >
     <UCard
       v-for="r in results"
       :key="r.id"
-      class="flex flex-col justify-between"
+      class="flex flex-col"
     >
-      <div class="flex-1 space-y-2">
-        <p class="text-xs text-gray-500">
-          Score: {{ (r.score * 100).toFixed(1) }}%
-        </p>
-
-        <!-- File info row -->
-        <div class="flex items-center justify-between gap-4 text-xs text-gray-500">
-          <!-- Show parent document name for extracted images -->
-          <span v-if="r.metadata?.source === 'extracted' && r.metadata?.parent_filename" class="flex-1 min-w-0">
-            File: <strong>{{ r.metadata.parent_filename }}</strong>
-            <span v-if="r.metadata?.page_number" class="ml-1">(Page {{ r.metadata.page_number }})</span>
-          </span>
-          <!-- Show regular title for other results -->
-          <span v-else class="flex-1 min-w-0">
-            File: <strong>{{ getFileName(r.metadata?.title) }}</strong>
-          </span>
-
+      <template #header>
+        <div class="flex items-center justify-between w-full">
+          <h3 class="font-semibold truncate">
+            <!-- Show parent document name for extracted images -->
+            <span v-if="r.metadata?.source === 'extracted' && r.metadata?.parent_filename">
+              {{ r.metadata.parent_filename }}
+              <span v-if="r.metadata?.page_number" class="text-sm font-normal text-gray-500">(Page {{ r.metadata.page_number }})</span>
+            </span>
+            <!-- Show regular title for other results -->
+            <span v-else>{{ getFileName(r.metadata?.title) }}</span>
+          </h3>
           <div class="flex items-center gap-2 flex-shrink-0">
             <!-- For extracted images, show "Open Document" button to open parent -->
             <UButton
@@ -409,6 +451,12 @@ watch(
             </UButton>
           </div>
         </div>
+      </template>
+
+      <div class="flex-1 space-y-2">
+        <p class="text-xs text-gray-500">
+          Score: {{ (r.score * 100).toFixed(1) }}%
+        </p>
 
         <USeparator orientation="horizontal" class="h-auto self-stretch" size="lg" />
 
@@ -459,7 +507,7 @@ watch(
             v-if="r.metadata?.signed_url"
             :src="r.metadata.signed_url"
             :alt="r.metadata?.title || 'image result'"
-            class="object-contain mx-auto p-2 rounded-md border border-gray-200"
+            class="object-contain mx-auto p-2 rounded-md border border-gray-200 max-w-full max-h-96"
           />
           <p v-else class="text-sm text-gray-400 italic">
             (Image loading...)
@@ -485,7 +533,7 @@ watch(
             v-if="r.metadata?.signed_url"
             :src="r.metadata.signed_url"
             :alt="`Video frame at ${r.metadata?.timestamp?.toFixed(1)}s`"
-            class="object-contain mx-auto p-2 rounded-md border border-gray-200"
+            class="object-contain mx-auto p-2 rounded-md border border-gray-200 max-w-full max-h-96"
           />
           <p v-else class="text-sm text-gray-400 italic">
             (Frame loading...)

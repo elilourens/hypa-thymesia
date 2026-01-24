@@ -4,114 +4,101 @@ import type { TableColumn } from '@nuxt/ui'
 import type { SortingState } from '@tanstack/vue-table'
 import { useDebounceFn } from '@vueuse/core'
 import {
-  useFilesApi,
-  type FileItem,
+  useDocuments,
+  type DocumentItem,
   type SortField,
   type SortDir,
-  type Modality
-} from '~/composables/useFiles'
-import { useGroupsApi, NO_GROUP_VALUE } from '@/composables/useGroups'
-import { useIngest } from '@/composables/useIngest'
+} from '@/composables/useDocuments'
+import { NO_GROUP_VALUE } from '@/composables/useGroups'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
-import { CalendarDate, getLocalTimeZone } from '@internationalized/date'
 
 const UButton = resolveComponent('UButton')
 const UBadge = resolveComponent('UBadge')
 const UCheckbox = resolveComponent('UCheckbox')
 const UIcon = resolveComponent('UIcon')
-const UInput = resolveComponent('UInput')
-const UInputMenu = resolveComponent('UInputMenu')
-const UPopover = resolveComponent('UPopover')
-const UCalendar = resolveComponent('UCalendar')
 
 const table = useTemplateRef('table')
 
-// ⬇️ include getSignedUrl
-const { listFiles, getSignedUrl } = useFilesApi()
-const { setDocGroup } = useGroupsApi()
-const { deleteDoc } = useIngest()
+const { listDocuments, deleteDocument, updateDocumentGroup } = useDocuments()
 const toast = useToast()
 
 /** ---------- Table state ---------- **/
-const data = ref<FileItem[]>([])
+const data = ref<DocumentItem[]>([])
 const total = ref(0)
 const sorting = ref<SortingState>([{ id: 'created_at', desc: true }])
 const pagination = reactive({ pageIndex: 0, pageSize: 20 })
-const filenameQuery = ref('')
 const selectedGroupId = ref<string | null>(null)
-
-/** ---------- Filters ---------- **/
-const selectedModality = ref<Modality | null>(null)
-const minSize = ref<number | null>(null) // in MB
-const maxSize = ref<number | null>(null) // in MB
-
-// Date range
-const dateRange = ref<{ start: CalendarDate | null; end: CalendarDate | null }>({
-  start: null,
-  end: null
-})
+const searchQuery = ref<string>('')
 
 /** ---------- Bulk selection helpers ---------- **/
 function selectedRowIds(): string[] {
   const rows = table?.value?.tableApi?.getSelectedRowModel().rows ?? []
-  return rows.map((r: any) => r.original.doc_id as string)
+  return rows.map((r: any) => r.original.id as string)
 }
 
 /** ---------- Delete state ---------- **/
-const deleting = ref(false)
+const deletingIds = ref<Set<string>>(new Set())
 
-async function deleteSelected() {
-  const ids = selectedRowIds()
-  if (!ids.length) return
-  if (!confirm(`Delete ${ids.length} document(s)? This cannot be undone.`)) return
+async function deleteDocument_(docId: string) {
+  if (!confirm('Delete this document? This cannot be undone.')) return
 
-  deleting.value = true
+  deletingIds.value.add(docId)
   try {
-    for (const id of ids) {
-      await deleteDoc(id)
-      data.value = data.value.filter(d => d.doc_id !== id)
-      total.value = Math.max(0, total.value - 1)
-    }
-    toast.add({ title: `Deleted ${ids.length} file(s)`, color: 'success', icon: 'i-lucide-trash-2' })
-  } catch (e: any) {
-    toast.add({ title: e?.message ?? 'Delete failed', color: 'error', icon: 'i-lucide-alert-triangle' })
-  } finally {
-    deleting.value = false
+    await deleteDocument(docId)
+    data.value = data.value.filter(d => d.id !== docId)
+    total.value = Math.max(0, total.value - 1)
+    toast.add({ title: 'Document deleted', color: 'success', icon: 'i-lucide-trash-2' })
+
     if (data.value.length === 0 && pagination.pageIndex > 0) {
       pagination.pageIndex -= 1
       await fetchFiles()
     }
+  } catch (e: any) {
+    toast.add({ title: e?.message ?? 'Delete failed', color: 'error', icon: 'i-lucide-alert-triangle' })
+  } finally {
+    deletingIds.value.delete(docId)
   }
 }
 
-/** ---------- Bulk group change ---------- **/
-const updatingGroup = ref(false)
+/** ---------- Set group state ---------- **/
+const settingGroupIds = ref<Set<string>>(new Set())
+const selectedGroupForBulk = ref<string | null>(null)
 
-async function bulkChangeGroup(value: string | null) {
+async function setGroupForSelected() {
   const ids = selectedRowIds()
-  if (!ids.length) return
+  if (!ids.length) {
+    toast.add({ title: 'No documents selected', color: 'warning' })
+    return
+  }
 
-  const gid: string | null = value === NO_GROUP_VALUE ? null : value
-  updatingGroup.value = true
+  if (selectedGroupForBulk.value === null) {
+    toast.add({ title: 'Please select a group', color: 'warning' })
+    return
+  }
+
+  settingGroupIds.value = new Set(ids)
   try {
+    // Convert NO_GROUP_VALUE sentinel to null for the backend
+    const groupId = selectedGroupForBulk.value === NO_GROUP_VALUE ? null : selectedGroupForBulk.value
+
     for (const id of ids) {
-      await setDocGroup(id, gid)
-      const row = data.value.find(d => d.doc_id === id)
-      if (row) {
-        row.group_id = gid
-        row.group_name = gid ? row.group_name : null
+      await updateDocumentGroup(id, groupId)
+      const doc = data.value.find(d => d.id === id)
+      if (doc) {
+        doc.group_id = groupId
+        doc.group_name = null
       }
     }
-    toast.add({
-      title: gid ? `Moved ${ids.length} file(s) to group` : `Cleared group for ${ids.length} file(s)`,
-      color: 'success',
-      icon: 'i-lucide-check'
-    })
+    toast.add({ title: `Updated ${ids.length} document(s)`, color: 'success', icon: 'i-lucide-check' })
+    selectedGroupForBulk.value = null
+
+    // Clear selection
+    table.value?.tableApi?.toggleAllPageRowsSelected(false)
   } catch (e: any) {
-    toast.add({ title: e?.message ?? 'Failed to change group', color: 'error', icon: 'i-lucide-alert-triangle' })
+    toast.add({ title: e?.message ?? 'Failed to update documents', color: 'error', icon: 'i-lucide-alert-triangle' })
   } finally {
-    updatingGroup.value = false
+    settingGroupIds.value.clear()
   }
 }
 
@@ -134,10 +121,6 @@ function sortHeader(label: string, columnId: string) {
   }
 }
 
-function stripLeadingUuid(name: string) {
-  return name.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, '')
-}
-
 function prettyMime(mime?: string): string {
   if (!mime) return '—'
   if (mime.includes('pdf')) return 'PDF'
@@ -149,10 +132,12 @@ function prettyMime(mime?: string): string {
   if (mime === 'text/plain') return 'Text File'
   if (mime.startsWith('image/')) return 'Image'
   if (mime.startsWith('text/')) return 'Text'
+  if (mime.startsWith('audio/')) return 'Audio'
+  if (mime.startsWith('video/')) return 'Video'
   return mime
 }
 
-const columns: TableColumn<FileItem>[] = [
+const columns: TableColumn<DocumentItem>[] = [
   {
     id: 'select',
     header: ({ table }) =>
@@ -177,14 +162,9 @@ const columns: TableColumn<FileItem>[] = [
     header: sortHeader('Name', 'filename'),
     cell: ({ row }) =>
       h('div', { class: 'truncate' }, [
-        h('div', { class: 'font-medium truncate', title: row.original.filename }, stripLeadingUuid(row.original.filename)),
+        h('div', { class: 'font-medium truncate', title: row.original.filename }, row.original.filename),
         h('div', { class: 'text-xs text-muted truncate' }, prettyMime(row.original.mime_type))
       ])
-  },
-  {
-    accessorKey: 'modality',
-    header: 'Modality',
-    cell: ({ row }) => h(UBadge, { variant: 'subtle' }, () => row.original.modality || '—')
   },
   {
     accessorKey: 'mime_type',
@@ -193,9 +173,14 @@ const columns: TableColumn<FileItem>[] = [
       h(UBadge, { variant: 'subtle', color: 'primary' }, () => prettyMime(row.original.mime_type))
   },
   {
-    accessorKey: 'size_bytes',
-    header: sortHeader('Size', 'size_bytes'),
-    cell: ({ row }) => formatSize(row.original.size_bytes)
+    accessorKey: 'chunk_count',
+    header: 'Chunks',
+    cell: ({ row }) => row.original.chunk_count ?? '—'
+  },
+  {
+    accessorKey: 'page_count',
+    header: sortHeader('Pages', 'page_count'),
+    cell: ({ row }) => row.original.page_count ?? '—'
   },
   {
     accessorKey: 'created_at',
@@ -211,37 +196,20 @@ const columns: TableColumn<FileItem>[] = [
         : '—'
   },
   {
-    accessorKey: 'storage_provider',
-    header: 'Source',
-    cell: ({ row }) => {
-      const provider = row.original.storage_provider || 'supabase'
-      const providerLabel = provider === 'google_drive' ? 'Google Drive' : provider === 'supabase' ? 'Supabase' : provider
-      const color = provider === 'google_drive' ? 'blue' : 'gray'
-      return h(UBadge, { variant: 'subtle', color }, () => providerLabel)
-    }
-  },
-  {
     id: 'actions',
     header: 'Actions',
+    enableSorting: false,
     cell: ({ row }) =>
       h(UButton, {
-        size: 'xs',
-        color: 'primary',
-        variant: 'soft',
-        icon: 'i-heroicons-eye',
-        onClick: async () => {
-          try {
-            const url = await getSignedUrl(row.original.bucket, row.original.storage_path)
-            if (url) window.open(url, '_blank')
-          } catch (err: any) {
-            toast.add({
-              title: 'Could not open file',
-              description: err.message || 'Error generating signed URL',
-              color: 'error'
-            })
-          }
-        }
-      }, 'Open')
+        color: 'error',
+        variant: 'ghost',
+        size: 'sm',
+        icon: 'i-lucide-trash-2',
+        loading: deletingIds.value.has(row.original.id),
+        disabled: deletingIds.value.has(row.original.id),
+        onClick: () => deleteDocument_(row.original.id),
+        'aria-label': 'Delete document'
+      })
   }
 ]
 
@@ -251,12 +219,13 @@ const error = ref<string | null>(null)
 
 function mapSortField(id?: string): SortField {
   switch (id) {
-    case 'filename': return 'name'
-    case 'size_bytes': return 'size'
+    case 'filename': return 'filename'
+    case 'page_count': return 'page_count'
     case 'created_at':
     default: return 'created_at'
   }
 }
+
 function mapSortDir(desc?: boolean): SortDir {
   return desc ? 'desc' : 'asc'
 }
@@ -267,31 +236,18 @@ const fetchFiles = async () => {
   try {
     const activeSort = sorting.value[0] || { id: 'created_at', desc: true }
 
-    const created_from = dateRange.value.start
-      ? dateRange.value.start.toDate(getLocalTimeZone()).toISOString()
-      : null
-    const created_to = dateRange.value.end
-      ? dateRange.value.end.toDate(getLocalTimeZone()).toISOString()
-      : null
-
-    const res = await listFiles({
-      q: filenameQuery.value || null,
-      modality: selectedModality.value,
-      created_from,
-      created_to,
-      min_size: minSize.value ? minSize.value * 1024 * 1024 : null,
-      max_size: maxSize.value ? maxSize.value * 1024 * 1024 : null,
-      group_id: selectedGroupId.value === NO_GROUP_VALUE ? '' : selectedGroupId.value || null,
+    const res = await listDocuments({
+      group_id: selectedGroupId.value,
       sort: mapSortField(activeSort.id),
       dir: mapSortDir(activeSort.desc),
       page: pagination.pageIndex + 1,
       page_size: pagination.pageSize,
-      group_sort: 'none'
+      search: searchQuery.value || undefined,
     })
     data.value = res.items
     total.value = res.total
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load files'
+    error.value = e?.message || 'Failed to load documents'
   } finally {
     pending.value = false
   }
@@ -299,7 +255,7 @@ const fetchFiles = async () => {
 
 const debouncedFetch = useDebounceFn(fetchFiles, 150)
 watch([sorting, () => pagination.pageIndex, () => pagination.pageSize], () => debouncedFetch(), { deep: true })
-watch([filenameQuery, selectedGroupId, dateRange, minSize, maxSize, selectedModality], () => {
+watch([selectedGroupId, searchQuery], () => {
   pagination.pageIndex = 0
   debouncedFetch()
 })
@@ -307,13 +263,6 @@ watch([filenameQuery, selectedGroupId, dateRange, minSize, maxSize, selectedModa
 onMounted(fetchFiles)
 
 /** ---------- Utils ---------- **/
-function formatSize(n?: number | null) {
-  if (n == null) return '—'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0, v = n
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
-}
 function formatDate(iso: string) {
   const d = new Date(iso)
   return new Intl.DateTimeFormat(undefined, {
@@ -324,76 +273,28 @@ function formatDate(iso: string) {
     minute: '2-digit'
   }).format(d)
 }
-function getRowId(row: FileItem) { return row.doc_id }
+
+function getRowId(row: DocumentItem) { return row.id }
 </script>
 
 <template>
-  <!-- Search & Filters -->
+  <!-- Filters -->
   <BodyCard>
-    <h1 class="font-semibold text-lg mb-4">Search Files</h1>
+    <h1 class="font-semibold text-lg mb-4">Your Documents</h1>
 
     <!-- Filter block -->
     <div class="space-y-4">
-      <!-- Grid of filters -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 px-4 py-4 border-b border-accented bg-muted/20 rounded-md">
+      <div class="flex items-center gap-4 px-4 py-4 border-b border-accented bg-muted/20 rounded-md flex-wrap">
         <UInput
-          v-model="filenameQuery"
-          placeholder="Search filename…"
-          icon="i-heroicons-magnifying-glass-20-solid"
+          v-model="searchQuery"
+          type="text"
+          placeholder="Search by filename..."
+          icon="i-lucide-search"
+          :ui="{ base: 'w-48' }"
         />
 
         <GroupSelect v-model="selectedGroupId" :include-no-group="true" />
 
-        <!-- Date Range -->
-        <UPopover>
-          <UButton color="neutral" variant="subtle" icon="i-lucide-calendar">
-            <template v-if="dateRange.start">
-              <template v-if="dateRange.end">
-                {{ dateRange.start.toDate(getLocalTimeZone()).toLocaleDateString() }} –
-                {{ dateRange.end.toDate(getLocalTimeZone()).toLocaleDateString() }}
-              </template>
-              <template v-else>
-                {{ dateRange.start.toDate(getLocalTimeZone()).toLocaleDateString() }}
-              </template>
-            </template>
-            <template v-else>
-              Date range
-            </template>
-          </UButton>
-          <template #content>
-            <UCalendar v-model="dateRange" range class="p-2" :number-of-months="2" />
-          </template>
-        </UPopover>
-
-        <!-- Modality -->
-        <UInputMenu
-          v-model="selectedModality"
-          :items="[
-            { label: 'All', value: null },
-            { label: 'Text', value: 'text' },
-            { label: 'Image', value: 'image' },
-            { label: 'Audio', value: 'audio' },
-            { label: 'Video', value: 'video' }
-          ]"
-          value-key="value"
-          label-key="label"
-          placeholder="Select modality…"
-        />
-
-        <UInput v-model.number="minSize" type="number" placeholder="Min size (MB)" />
-        <UInput v-model.number="maxSize" type="number" placeholder="Max size (MB)" />
-      </div>
-
-      <!-- Refresh + total -->
-      <div class="flex justify-between items-center px-4">
-        <UButton
-          color="primary"
-          icon="i-lucide-refresh-ccw"
-          variant="outline"
-          @click="fetchFiles"
-        >
-          Refresh Table
-        </UButton>
         <div class="text-sm text-muted">
           <span v-if="!pending">Total: {{ total.toLocaleString() }}</span>
           <span v-else>Loading…</span>
@@ -402,47 +303,33 @@ function getRowId(row: FileItem) { return row.doc_id }
     </div>
   </BodyCard>
 
-  <!-- Bulk actions -->
+  <!-- Documents Table -->
   <BodyCard>
-    <h2 class="font-semibold text-lg mb-3">Bulk Actions</h2>
-    <div class="flex flex-wrap gap-4 items-center px-4 py-3 border-b border-accented bg-muted/20 rounded-md">
-      <GroupSelect
-        :model-value="null"
-        placeholder="Move selected to group…"
-        :include-no-group="true"
-        class="w-64 mr-10"
-        :disabled="!selectedRowIds().length || updatingGroup"
-        @update:model-value="bulkChangeGroup"
-      />
-
+    <div class="flex items-center justify-between mb-4 px-4 pt-4">
+      <h2 class="font-semibold text-lg">Files</h2>
       <UButton
-        color="error"
-        icon="i-lucide-trash-2"
+        color="primary"
+        icon="i-lucide-refresh-ccw"
         variant="outline"
-        :disabled="!selectedRowIds().length || deleting"
-        @click="deleteSelected"
+        @click="fetchFiles"
       >
-        Delete Selected
+        Refresh
       </UButton>
     </div>
-  </BodyCard>
-
-  <!-- Files Table -->
-  <BodyCard>
     <UTable
       ref="table"
       :data="data"
       :columns="columns"
       :loading="pending"
       sticky
-      empty="No files found."
+      empty="No documents found."
       :ui="{ root: 'min-w-full', td: 'whitespace-nowrap' }"
       :pagination="pagination"
       :sorting="sorting"
       :getRowId="getRowId"
       class="flex-1"
     >
-      <template #loading><div class="py-6 text-sm">Fetching files…</div></template>
+      <template #loading><div class="py-6 text-sm">Fetching documents…</div></template>
       <template #empty><div class="py-6 text-sm">Nothing to show.</div></template>
     </UTable>
 
@@ -465,5 +352,29 @@ function getRowId(row: FileItem) { return row.doc_id }
       variant="subtle"
       class="mx-4 mb-4"
     />
+  </BodyCard>
+
+  <!-- Bulk actions -->
+  <BodyCard>
+    <h2 class="font-semibold text-lg mb-3">Bulk Actions</h2>
+    <div class="flex flex-wrap gap-4 items-center px-4 py-3 border-b border-accented bg-muted/20 rounded-md">
+      <div class="flex items-center gap-2">
+        <label class="text-sm font-medium">Set Group:</label>
+        <GroupSelect
+          v-model="selectedGroupForBulk"
+          :include-no-group="true"
+        />
+      </div>
+      <UButton
+        color="primary"
+        icon="i-lucide-check"
+        variant="outline"
+        :disabled="!selectedRowIds().length || !selectedGroupForBulk || settingGroupIds.size > 0"
+        :loading="settingGroupIds.size > 0"
+        @click="setGroupForSelected"
+      >
+        Apply
+      </UButton>
+    </div>
   </BodyCard>
 </template>

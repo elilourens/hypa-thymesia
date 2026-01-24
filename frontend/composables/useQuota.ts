@@ -18,56 +18,27 @@ export function useQuota() {
   }
 
   interface QuotaInfo {
-    current_count: number
-    max_files: number
-    remaining: number
-    over_limit: number
+    current_count: number  // Current page count
+    max_files: number      // Maximum pages allowed
+    remaining: number      // Pages remaining
+    over_limit: number     // Pages over limit
     is_over_limit: boolean
     can_upload: boolean
     percentage_used: number
   }
 
   /**
-   * Calculate file tokens needed for a video based on duration
-   * 5 minutes = 1 token
-   */
-  function calculateVideoTokens(durationSeconds: number): number {
-    const MINUTES_PER_TOKEN = 5
-    if (durationSeconds <= 0) return 1
-    return Math.max(1, Math.ceil(durationSeconds / (MINUTES_PER_TOKEN * 60)))
-  }
-
-  /**
-   * Get user's current file quota information
+   * Get user's current page quota information
    */
   async function getQuota(): Promise<QuotaInfo> {
     try {
       const headers = await authHeaders()
-      return await $fetch<QuotaInfo>(`${API_BASE}/user/quota`, {
+      return await $fetch<QuotaInfo>(`${API_BASE}/user-settings/quota-status`, {
         method: 'GET',
         headers,
       })
     } catch (err: any) {
       throw new Error(err?.data?.message || err?.message || 'Failed to fetch quota')
-    }
-  }
-
-  /**
-   * Update user's max files limit (typically called after payment)
-   */
-  async function updateMaxFiles(maxFiles: number): Promise<any> {
-    try {
-      const headers = {
-        'Content-Type': 'application/json',
-        ...(await authHeaders()),
-      }
-      return await $fetch(`${API_BASE}/user/max-files`, {
-        method: 'PATCH',
-        headers,
-        body: { max_files: maxFiles },
-      })
-    } catch (err: any) {
-      throw new Error(err?.data?.message || err?.message || 'Failed to update limit')
     }
   }
 
@@ -87,7 +58,7 @@ export function useQuota() {
 
     // Check error message
     const message = error?.message || error?.data?.message || String(error)
-    return message.includes('file upload limit') || message.includes('file_limit_reached')
+    return message.includes('file upload limit') || message.includes('page upload limit') || message.includes('file_limit_reached')
   }
 
   /**
@@ -114,9 +85,7 @@ export function useQuota() {
 
   return {
     getQuota,
-    updateMaxFiles,
     isQuotaError,
     getQuotaFromError,
-    calculateVideoTokens,
   }
 }
