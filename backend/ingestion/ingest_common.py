@@ -120,18 +120,35 @@ async def ingest_file_content(
         if enable_tagging:
             logger.info(f"Scheduling auto-tagging for uploaded image: doc_id={doc_id}, chunk_id={result['chunk_id']}")
             try:
-                from tagging.background_tasks import tag_image_background
-                # Schedule tagging without blocking the response, passing chunk_id directly
-                asyncio.create_task(
-                    tag_image_background(
-                        chunk_id=result["chunk_id"],
-                        user_id=user_id,
-                        doc_id=doc_id,
-                        image_embedding=image_vectors[0],
-                        storage_path=result["storage_path"],
-                        bucket=result["bucket"]
+                use_celery = os.getenv("USE_CELERY", "false").lower() == "true"
+                if use_celery:
+                    from celery_app import celery_app
+                    # Submit tagging task via Celery
+                    celery_app.send_task(
+                        "app.celery_tasks.tag_image",
+                        kwargs={
+                            "chunk_id": result["chunk_id"],
+                            "user_id": user_id,
+                            "doc_id": doc_id,
+                            "image_embedding": image_vectors[0].tolist() if hasattr(image_vectors[0], 'tolist') else image_vectors[0],
+                            "image_bytes": file_content,
+                        },
+                        queue="formatting_queue",
                     )
-                )
+                    logger.info(f"Submitted Celery image tagging task for chunk_id={result['chunk_id']}")
+                else:
+                    from tagging.background_tasks import tag_image_background
+                    # Schedule tagging without blocking the response, passing chunk_id directly
+                    asyncio.create_task(
+                        tag_image_background(
+                            chunk_id=result["chunk_id"],
+                            user_id=user_id,
+                            doc_id=doc_id,
+                            image_embedding=image_vectors[0],
+                            storage_path=result["storage_path"],
+                            bucket=result["bucket"]
+                        )
+                    )
             except Exception as e:
                 logger.warning(f"Failed to schedule tagging task: {e}")
         else:
@@ -377,15 +394,31 @@ async def ingest_file_content(
     if enable_tagging:
         logger.debug(f"Scheduling document tagging for doc_id={doc_id}")
         try:
-            asyncio.create_task(
-                tag_document_after_ingest(
-                    doc_id=doc_id,
-                    user_id=user_id,
-                    filename=filename,
-                    text_chunks=texts  # Pass extracted text directly
+            use_celery = os.getenv("USE_CELERY", "false").lower() == "true"
+            if use_celery:
+                from celery_app import celery_app
+                # Submit tagging task via Celery
+                celery_app.send_task(
+                    "app.celery_tasks.tag_document",
+                    kwargs={
+                        "doc_id": doc_id,
+                        "user_id": user_id,
+                        "filename": filename,
+                        "text_chunks": texts,
+                    },
+                    queue="formatting_queue",
                 )
-            )
-            logger.debug("Document tagging task scheduled successfully")
+                logger.debug("Submitted Celery document tagging task")
+            else:
+                asyncio.create_task(
+                    tag_document_after_ingest(
+                        doc_id=doc_id,
+                        user_id=user_id,
+                        filename=filename,
+                        text_chunks=texts  # Pass extracted text directly
+                    )
+                )
+                logger.debug("Document tagging task scheduled successfully")
         except Exception as e:
             logger.warning(f"Failed to schedule document tagging task: {e}")
     else:
@@ -395,15 +428,31 @@ async def ingest_file_content(
     # Format text chunks to improve readability after ingestion completes
     logger.debug(f"Scheduling chunk formatting for doc_id={doc_id}")
     try:
-        from tagging.background_tasks import format_document_chunks_after_ingest
-        asyncio.create_task(
-            format_document_chunks_after_ingest(
-                doc_id=doc_id,
-                user_id=user_id,
-                max_chunks=1000  # Format up to 1000 chunks per document
+        use_celery = os.getenv("USE_CELERY", "false").lower() == "true"
+        if use_celery:
+            from celery_app import celery_app
+            # Submit formatting task via Celery
+            celery_app.send_task(
+                "app.celery_tasks.format_chunks",
+                kwargs={
+                    "doc_id": doc_id,
+                    "user_id": user_id,
+                    "chunk_ids": [f"{doc_id}_{i}" for i in range(len(texts))],
+                    "texts": texts,
+                },
+                queue="formatting_queue",
             )
-        )
-        logger.debug("Chunk formatting task scheduled successfully")
+            logger.debug("Submitted Celery chunk formatting task")
+        else:
+            from tagging.background_tasks import format_document_chunks_after_ingest
+            asyncio.create_task(
+                format_document_chunks_after_ingest(
+                    doc_id=doc_id,
+                    user_id=user_id,
+                    max_chunks=1000  # Format up to 1000 chunks per document
+                )
+            )
+            logger.debug("Chunk formatting task scheduled successfully")
     except Exception as e:
         logger.warning(f"Failed to schedule chunk formatting task: {e}")
 

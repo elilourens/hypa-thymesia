@@ -23,6 +23,7 @@ router = APIRouter(prefix="/ingest", tags=["video"])
 
 # Video service URL - configurable via environment variable
 VIDEO_SERVICE_URL = os.getenv("VIDEO_SERVICE_URL", "http://localhost:8001")
+USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true"
 
 
 async def process_video_background(
@@ -154,8 +155,25 @@ async def ingest_video(
         logger.error(f"Error creating doc_meta: {e}", exc_info=True)
         raise HTTPException(500, detail="Failed to create document record")
 
-    # Queue background processing
-    if background_tasks:
+    # Queue processing via Celery or BackgroundTasks
+    task_id = None
+    if USE_CELERY:
+        from celery_tasks import ingest_video as celery_ingest_video
+        task = celery_ingest_video.delay(
+            file_content=content,
+            filename=file.filename,
+            mime_type=file.content_type,
+            user_id=user_id,
+            doc_id=doc_id,
+            group_id=group_id,
+        )
+        task_id = task.id
+        # Update doc_meta with Celery task ID
+        supabase.table("app_doc_meta").update({
+            "celery_task_id": task_id,
+        }).eq("doc_id", doc_id).execute()
+        logger.info(f"Queued Celery video processing: {file.filename} (doc_id={doc_id}, task_id={task_id})")
+    elif background_tasks:
         background_tasks.add_task(
             process_video_background,
             file_content=content,
@@ -182,6 +200,7 @@ async def ingest_video(
         "status": "queued",
         "message": "Video uploaded successfully. Processing in background.",
         "filename": file.filename,
+        "task_id": task_id,
     }
 
 

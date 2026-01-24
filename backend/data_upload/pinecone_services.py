@@ -31,12 +31,42 @@ if not IMAGE_INDEX_NAME:
 if not EXTRACTED_IMAGE_INDEX_NAME:
     raise RuntimeError("Missing PINECONE_EXTRACTED_IMAGE_INDEX_NAME.")
 
-# Lazy init: create Index handles
-_text_index = pc.Index(TEXT_INDEX_NAME)
-_image_index = pc.Index(IMAGE_INDEX_NAME)
-_extracted_image_index = pc.Index(EXTRACTED_IMAGE_INDEX_NAME)
-_video_frame_index = None  # Lazy loaded
-_video_transcript_index = None  # Lazy loaded
+# Lazy init: create Index handles (deferred until first use to avoid startup failures)
+_text_index = None
+_image_index = None
+_extracted_image_index = None
+_video_frame_index = None
+_video_transcript_index = None
+
+def _get_text_index():
+    global _text_index
+    if _text_index is None:
+        _text_index = pc.Index(TEXT_INDEX_NAME)
+    return _text_index
+
+def _get_image_index():
+    global _image_index
+    if _image_index is None:
+        _image_index = pc.Index(IMAGE_INDEX_NAME)
+    return _image_index
+
+def _get_extracted_image_index():
+    global _extracted_image_index
+    if _extracted_image_index is None:
+        _extracted_image_index = pc.Index(EXTRACTED_IMAGE_INDEX_NAME)
+    return _extracted_image_index
+
+def _get_video_frame_index():
+    global _video_frame_index
+    if _video_frame_index is None:
+        _video_frame_index = pc.Index(VIDEO_FRAME_INDEX_NAME)
+    return _video_frame_index
+
+def _get_video_transcript_index():
+    global _video_transcript_index
+    if _video_transcript_index is None:
+        _video_transcript_index = pc.Index(VIDEO_TRANSCRIPT_INDEX_NAME)
+    return _video_transcript_index
 
 # Model dims
 TEXT_DIM = 384          # all-MiniLM-L12-v2
@@ -53,30 +83,15 @@ def _chunked(xs: list, n: int):
     for i in range(0, len(xs), n):
         yield xs[i:i+n]
 
-def _get_video_frame_index():
-    """Lazy load video frame index."""
-    global _video_frame_index
-    if _video_frame_index is None:
-        _video_frame_index = pc.Index(VIDEO_FRAME_INDEX_NAME)
-    return _video_frame_index
-
-
-def _get_video_transcript_index():
-    """Lazy load video transcript index."""
-    global _video_transcript_index
-    if _video_transcript_index is None:
-        _video_transcript_index = pc.Index(VIDEO_TRANSCRIPT_INDEX_NAME)
-    return _video_transcript_index
-
 
 def _index_for_modality(modality: Modality):
     if modality == "text":
-        return _text_index, TEXT_DIM
+        return _get_text_index(), TEXT_DIM
     # Both CLIP-image and CLIP-text embeddings live in the same 512-D space
     if modality in ("image", "clip_text"):
-        return _image_index, IMAGE_TEXT_DIM
+        return _get_image_index(), IMAGE_TEXT_DIM
     if modality == "extracted_image":  # NEW
-        return _extracted_image_index, IMAGE_TEXT_DIM
+        return _get_extracted_image_index(), IMAGE_TEXT_DIM
     if modality == "video_frame":
         return _get_video_frame_index(), VIDEO_FRAME_DIM
     if modality == "video_transcript":

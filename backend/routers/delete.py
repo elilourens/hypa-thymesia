@@ -1,6 +1,7 @@
 # routes/delete.py (or wherever your delete endpoint lives)
 
 import logging
+import os
 from typing import Tuple, Set, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from core.deps import get_supabase
@@ -9,6 +10,7 @@ from data_upload.pinecone_services import delete_vectors_by_ids
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
+USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true"
 
 # In-memory store for deletion status (consider using Redis for production)
 _deletion_status: Dict[str, Dict[str, Any]] = {}
@@ -53,9 +55,9 @@ async def delete_document(
         raise HTTPException(404, detail="Document not found")
 
     modality = doc_meta_result.data[0].get("modality")
-    logger.info(f"Queueing background deletion for document {doc_id} with modality={modality} for user {user_id}")
+    logger.info(f"Queueing deletion for document {doc_id} with modality={modality} for user {user_id}")
 
-    # Initialize deletion status
+    # Initialize deletion status (for non-Celery path)
     _deletion_status[doc_id] = {
         "status": "deleting",
         "modality": modality,
@@ -64,13 +66,28 @@ async def delete_document(
         "result": None
     }
 
-    # Run deletion in background
-    background_tasks.add_task(_background_delete, doc_id, modality, user_id, supabase)
+    # Run deletion via Celery or BackgroundTasks
+    task_id = None
+    if USE_CELERY:
+        from celery_tasks import delete_document as celery_delete_document
+        task = celery_delete_document.delay(
+            doc_id=doc_id,
+            modality=modality,
+            user_id=user_id,
+        )
+        task_id = task.id
+        logger.info(f"Queued Celery deletion: doc_id={doc_id}, task_id={task_id}")
+    elif background_tasks:
+        background_tasks.add_task(_background_delete, doc_id, modality, user_id, supabase)
+        logger.info(f"Queued background deletion: doc_id={doc_id}")
+    else:
+        logger.warning("BackgroundTasks not available, deletion may not complete")
 
     return {
         "doc_id": doc_id,
         "status": "deleting",
-        "message": "Deletion started in background. Use /ingest/delete-status/{doc_id} to check progress."
+        "message": "Deletion started in background. Use /ingest/delete-status/{doc_id} to check progress.",
+        "task_id": task_id,
     }
 
 

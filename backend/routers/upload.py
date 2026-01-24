@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from ingestion.ingest_common import ingest_file_content
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
+USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true"
 
 
 async def process_file_background(
@@ -153,8 +155,28 @@ async def ingest_text_and_image_files(
         logger.error(f"Error creating doc_meta: {e}", exc_info=True)
         raise HTTPException(500, detail="Failed to create document record")
 
-    # --- Queue background processing ---
-    if background_tasks:
+    # --- Queue processing via Celery or BackgroundTasks ---
+    task_id = None
+    if USE_CELERY:
+        from celery_tasks import ingest_file
+        task = ingest_file.delay(
+            file_content=content,
+            filename=file.filename,
+            mime_type=file.content_type,
+            user_id=user_id,
+            doc_id=doc_id,
+            storage_path=storage_path,
+            extract_deep_embeds=extract_deep_embeds,
+            group_id=group_id,
+            enable_tagging=enable_tagging,
+        )
+        task_id = task.id
+        # Update doc_meta with Celery task ID
+        supabase.table("app_doc_meta").update({
+            "celery_task_id": task_id,
+        }).eq("doc_id", doc_id).execute()
+        logger.info(f"Queued Celery file processing: {file.filename} (doc_id={doc_id}, task_id={task_id})")
+    elif background_tasks:
         background_tasks.add_task(
             process_file_background,
             file_content=content,
@@ -190,6 +212,7 @@ async def ingest_text_and_image_files(
         "message": "File uploaded successfully. Processing in background.",
         "filename": file.filename,
         "storage_path": storage_path,
+        "task_id": task_id,
     }
 
 
@@ -207,21 +230,43 @@ async def get_processing_status(
     Frontend should poll every 30 seconds for videos and show "this might take a while" message.
     """
     user_id = auth.id
+    use_celery = os.getenv("USE_CELERY", "false").lower() == "true"
 
     try:
         # Query doc_meta for status
         response = supabase.table("app_doc_meta").select(
-            "doc_id, processing_status, filename, text_chunks_count, images_count, error_message, modality"
+            "doc_id, processing_status, filename, text_chunks_count, images_count, error_message, modality, celery_task_id"
         ).eq("doc_id", doc_id).eq("user_id", user_id).execute()
 
         if not response.data or len(response.data) == 0:
             raise HTTPException(status_code=404, detail="Document not found")
 
         doc_meta = response.data[0]
+        status = doc_meta.get("processing_status", "unknown")
+
+        # Check Celery task state if USE_CELERY and task_id exists
+        if use_celery and doc_meta.get("celery_task_id"):
+            from celery_app import celery_app
+            task_id = doc_meta["celery_task_id"]
+            task = celery_app.AsyncResult(task_id)
+
+            # Map Celery states to our status values
+            celery_state_map = {
+                "PENDING": "queued",
+                "STARTED": "processing",
+                "SUCCESS": "completed",
+                "FAILURE": "failed",
+                "RETRY": "processing",
+            }
+            celery_status = celery_state_map.get(task.state, status)
+
+            # Prefer Celery state over database state for accuracy
+            if task.state in celery_state_map:
+                status = celery_status
 
         return {
             "doc_id": doc_meta["doc_id"],
-            "status": doc_meta.get("processing_status", "unknown"),
+            "status": status,
             "filename": doc_meta.get("filename"),
             "text_chunks_count": doc_meta.get("text_chunks_count", 0),
             "images_count": doc_meta.get("images_count", 0),
