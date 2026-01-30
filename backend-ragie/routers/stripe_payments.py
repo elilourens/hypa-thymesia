@@ -19,6 +19,8 @@ STRIPE_WEBHOOK_SECRET = settings.stripe_webhook_secret
 PREMIUM_PRICE_ID = settings.stripe_price_id
 PREMIUM_MAX_FILES = 2000  # Premium tier page limit
 FREE_MAX_FILES = 200  # Free tier page limit
+PREMIUM_MAX_MONTHLY_FILES = 500  # Premium tier monthly file uploads
+FREE_MAX_MONTHLY_FILES = 50  # Free tier monthly file uploads
 
 
 class CreateCheckoutSessionRequest(BaseModel):
@@ -266,6 +268,7 @@ async def handle_checkout_completed(session, supabase):
         "stripe_current_period_end": subscription.current_period_end,
         "stripe_cancel_at_period_end": subscription.cancel_at_period_end,
         "max_files": PREMIUM_MAX_FILES,
+        "max_monthly_files": PREMIUM_MAX_MONTHLY_FILES,
     }).eq("user_id", user_id).execute()
 
     logger.info(f"Activated premium subscription for user {user_id}")
@@ -289,8 +292,10 @@ async def handle_subscription_updated(subscription, supabase):
 
     if subscription.get("status") in ["active", "trialing"]:
         update_data["max_files"] = PREMIUM_MAX_FILES
+        update_data["max_monthly_files"] = PREMIUM_MAX_MONTHLY_FILES
     elif subscription.get("status") in ["canceled", "unpaid", "past_due"]:
         update_data["max_files"] = FREE_MAX_FILES
+        update_data["max_monthly_files"] = FREE_MAX_MONTHLY_FILES
 
     supabase.table("user_settings").update(update_data).eq("user_id", user_id).execute()
 
@@ -309,6 +314,7 @@ async def handle_subscription_deleted(subscription, supabase):
         "stripe_subscription_status": "canceled",
         "stripe_cancel_at_period_end": False,
         "max_files": FREE_MAX_FILES,
+        "max_monthly_files": FREE_MAX_MONTHLY_FILES,
     }).eq("user_id", user_id).execute()
 
     logger.info(f"Downgraded user {user_id} to free tier")

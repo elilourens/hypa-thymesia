@@ -8,7 +8,8 @@ class Settings(BaseSettings):
 
     # Supabase Configuration
     supabase_url: str
-    supabase_key: str
+    supabase_key: str  # Service role key for admin operations
+    supabase_anon_key: str  # Anon/publishable key for user operations with RLS
 
     # Ragie Configuration
     ragie_api_key: str

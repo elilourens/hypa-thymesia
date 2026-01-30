@@ -16,11 +16,21 @@ const toast = useToast()
 // UI state
 const files = ref<File[]>([])
 const uploading = ref(false)
+const loadingQuota = ref(false)
 const quotaInfo = ref<{
-  current_count: number
-  max_files: number
+  current_page_count: number
+  max_pages: number
+  page_remaining: number
+  page_over_limit: number
+  page_is_over_limit: boolean
+  page_can_upload: boolean
+  page_percentage_used: number
+  monthly_file_count: number
+  max_monthly_files: number
+  monthly_remaining: number
+  monthly_can_upload: boolean
+  monthly_percentage_used: number
   can_upload: boolean
-  is_over_limit: boolean
 } | null>(null)
 
 
@@ -34,10 +44,13 @@ const newGroupName = ref('')
 // Load quota on mount
 onMounted(async () => {
   try {
+    loadingQuota.value = true
     const quota = await getQuota()
     quotaInfo.value = quota
   } catch (e: any) {
     console.error('Failed to load quota:', e)
+  } finally {
+    loadingQuota.value = false
   }
 })
 
@@ -99,12 +112,10 @@ async function doUpload(): Promise<void> {
     uploading.value = true
 
     // Check quota before uploading
-    const currentQuota = await getQuota()
-    if (!currentQuota.can_upload) {
-      const quotaData = currentQuota
+    if (quotaInfo.value && !quotaInfo.value.can_upload) {
       toast.add({
         title: 'Upload limit reached',
-        description: `You have ${quotaData?.current_count || 0} of ${quotaData?.max_files || 200} pages. Check the Usage tab for more details.`,
+        description: `You have ${quotaInfo.value.current_page_count} of ${quotaInfo.value.max_pages} pages. Check the Usage tab for more details.`,
         color: 'error',
         icon: 'i-lucide-alert-triangle'
       })
@@ -224,7 +235,7 @@ async function doUpload(): Promise<void> {
 
   <!-- Usage Display Card -->
   <BodyCard class="mt-6">
-    <UsageDisplay />
+    <UsageDisplay :quota-info="quotaInfo" :loading="loadingQuota" />
   </BodyCard>
 </template>
 

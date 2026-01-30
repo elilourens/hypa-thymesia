@@ -50,24 +50,15 @@ async def get_user_settings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/quota-status", response_model=UserQuotaStatus)
+@router.get("/quota-status")
 async def get_quota_status(
     current_user: AuthUser = Depends(get_current_user),
     supabase: Client = Depends(get_supabase),
 ):
-    """Get user quota status."""
+    """Get user quota status (pages and monthly files)."""
     try:
         quota_status = get_user_quota_status(supabase, current_user.id)
-
-        return UserQuotaStatus(
-            current_count=quota_status["current_count"],
-            max_files=quota_status["max_files"],
-            remaining=quota_status["remaining"],
-            over_limit=quota_status["over_limit"],
-            is_over_limit=quota_status["is_over_limit"],
-            can_upload=quota_status["can_upload"],
-            percentage_used=quota_status["percentage_used"],
-        )
+        return quota_status
 
     except Exception as e:
         logger.error(f"Error getting quota status: {e}")

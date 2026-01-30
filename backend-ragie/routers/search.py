@@ -50,11 +50,36 @@ async def retrieve(
                         metadata["title"] = first_line
 
                 # Enrich metadata with storage info for Ragie-stored documents
-                # Ragie documents are accessed via our proxy endpoint
+                # Ragie documents are accessed via our proxy endpoint or Supabase storage
                 doc_id = chunk.document_id if hasattr(chunk, "document_id") else None
                 if doc_id:
-                    metadata["bucket"] = "ragie"
-                    metadata["storage_path"] = str(doc_id)
+                    # Check if this is a video document stored in Supabase
+                    is_video = metadata.get("chunk_content_type") == "video"
+
+                    if is_video:
+                        # Video chunks: get storage path from Supabase videos table
+                        try:
+                            from core.deps import get_supabase
+                            supabase = get_supabase()
+                            video_response = supabase.table("videos").select(
+                                "storage_path"
+                            ).eq("ragie_document_id", str(doc_id)).single().execute()
+
+                            if video_response.data:
+                                metadata["bucket"] = "supabase"
+                                metadata["storage_path"] = video_response.data["storage_path"]
+                            else:
+                                # Fallback to Ragie if not found in Supabase
+                                metadata["bucket"] = "ragie"
+                                metadata["storage_path"] = str(doc_id)
+                        except Exception:
+                            # Fallback to Ragie on error
+                            metadata["bucket"] = "ragie"
+                            metadata["storage_path"] = str(doc_id)
+                    else:
+                        # Non-video documents: use Ragie storage
+                        metadata["bucket"] = "ragie"
+                        metadata["storage_path"] = str(doc_id)
 
                     # Infer modality from content type if not already set
                     if "modality" not in metadata:

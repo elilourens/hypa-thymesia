@@ -14,6 +14,7 @@ from routers import (
     user_settings_router,
     audit_router,
     storage_router,
+    videos_router,
 )
 
 # Configure logging
@@ -45,6 +46,7 @@ app.include_router(stripe_router, prefix=settings.api_prefix)
 app.include_router(user_settings_router, prefix=settings.api_prefix)
 app.include_router(audit_router, prefix=settings.api_prefix)
 app.include_router(storage_router, prefix=settings.api_prefix)
+app.include_router(videos_router, prefix=settings.api_prefix)
 
 
 @app.on_event("startup")

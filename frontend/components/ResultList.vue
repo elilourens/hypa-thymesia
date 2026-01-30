@@ -237,17 +237,27 @@ async function handlePlayVideo(r: any, timestamp: number) {
   videoStartTime.value = timestamp
 
   try {
-    // Get video info (bucket and storage_path) from the video_id
-    const videoId = r.metadata?.video_id
-    if (!videoId) {
-      throw new Error('Video ID not found in result metadata')
+    let url: string | null = null
+
+    // Check if this is a Ragie video chunk (from Supabase storage)
+    if (r.metadata?.chunk_content_type === 'video' && r.metadata?.bucket === 'supabase') {
+      // Get signed URL directly from Supabase
+      url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path, false)
+      videoFilename.value = r.metadata?.title || 'Video'
+    } else {
+      // Legacy video frame hit or other video sources
+      const videoId = r.metadata?.video_id
+      if (!videoId) {
+        throw new Error('Video ID not found in result metadata')
+      }
+
+      const info = await getVideoInfo(videoId)
+      videoFilename.value = info.filename || 'Video'
+
+      // Get signed URL for the video
+      url = await getSignedUrl(info.bucket, info.storage_path, false)
     }
 
-    const info = await getVideoInfo(videoId)
-    videoFilename.value = info.filename || 'Video'
-
-    // Get signed URL for the video
-    const url = await getSignedUrl(info.bucket, info.storage_path, false)
     if (!url) throw new Error('No URL returned')
 
     videoUrl.value = url
@@ -281,6 +291,19 @@ function closeVideoModal() {
   videoUrl.value = ''
   videoStartTime.value = 0
   videoFilename.value = ''
+}
+
+// ========== Helper Functions ==========
+
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+}
+
+function truncateText(text: string, maxLen: number): string {
+  if (!text) return ''
+  return text.length > maxLen ? text.substring(0, maxLen) + '...' : text
 }
 
 // ========== Auto Fetch Thumbnail URLs for Images and PDFs ==========
@@ -383,6 +406,37 @@ watch(
           }
         } catch (err) {
           console.error('Failed to get thumbnail URL for video frame', r.metadata.storage_path, err)
+        } finally {
+          pendingFetches.value.delete(cacheKey)
+        }
+      }
+
+      // For Ragie video chunks from Supabase, pre-fetch signed URL for caching
+      if (r.metadata?.chunk_content_type === 'video' && r.metadata?.bucket === 'supabase' && !r.metadata?.signed_url) {
+        const cacheKey = `${r.metadata.bucket}:${r.metadata.storage_path}`
+
+        // Check cache first
+        if (urlCache.value.has(cacheKey)) {
+          r.metadata.signed_url = urlCache.value.get(cacheKey)
+          continue
+        }
+
+        // Skip if already fetching
+        if (pendingFetches.value.has(cacheKey)) continue
+
+        try {
+          pendingFetches.value.add(cacheKey)
+          const url = await getSignedUrl(
+            r.metadata.bucket,
+            r.metadata.storage_path,
+            false
+          )
+          if (url) {
+            r.metadata.signed_url = url
+            urlCache.value.set(cacheKey, url)
+          }
+        } catch (err) {
+          console.error('Failed to get signed URL for video chunk', r.metadata.storage_path, err)
         } finally {
           pendingFetches.value.delete(cacheKey)
         }
@@ -584,6 +638,45 @@ watch(
               @click="handlePlayVideo(r, r.metadata?.start_time || 0)"
             >
               Play from this segment
+            </UButton>
+          </div>
+        </div>
+
+        <!-- Render Ragie video chunks (from Supabase storage) -->
+        <div v-else-if="r.metadata?.chunk_content_type === 'video'">
+          <!-- Time Range Badge -->
+          <div class="mb-3 flex gap-2 items-center">
+            <UBadge color="primary" variant="soft" size="sm">
+              {{ formatTime(r.metadata?.start_time || 0) }} - {{ formatTime(r.metadata?.end_time || 0) }}
+            </UBadge>
+            <span class="text-xs text-gray-500">
+              {{ ((r.metadata?.end_time || 0) - (r.metadata?.start_time || 0)).toFixed(0) }}s clip
+            </span>
+          </div>
+
+          <!-- Transcription -->
+          <div class="bg-gray-50 dark:bg-gray-900 p-3 rounded-md border border-gray-200 dark:border-gray-800 mb-3">
+            <p class="text-sm text-gray-700 dark:text-gray-300">
+              <strong>Transcript:</strong> "{{ truncateText(r.metadata?.audio_transcript || r.metadata?.text, 250) }}"
+            </p>
+          </div>
+
+          <!-- Video Description -->
+          <div v-if="r.metadata?.video_description" class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md border border-blue-200 dark:border-blue-800 mb-3">
+            <p class="text-sm text-blue-700 dark:text-blue-300">
+              <strong>Visual:</strong> {{ truncateText(r.metadata?.video_description, 250) }}
+            </p>
+          </div>
+
+          <!-- Play Button -->
+          <div class="flex gap-2">
+            <UButton
+              size="sm"
+              color="primary"
+              icon="i-heroicons-play"
+              @click="handlePlayVideo(r, r.metadata?.start_time || 0)"
+            >
+              Play from {{ formatTime(r.metadata?.start_time || 0) }}
             </UButton>
           </div>
         </div>

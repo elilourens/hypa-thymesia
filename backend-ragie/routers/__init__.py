@@ -8,6 +8,7 @@ from .stripe_payments import router as stripe_router
 from .user_settings import router as user_settings_router
 from .audit import router as audit_router
 from .storage import router as storage_router
+from .videos import router as videos_router
 
 __all__ = [
     "health_router",
@@ -18,4 +19,5 @@ __all__ = [
     "user_settings_router",
     "audit_router",
     "storage_router",
+    "videos_router",
 ]

@@ -1,37 +1,47 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useQuota } from '@/composables/useQuota'
 
-const { getQuota } = useQuota()
-
-const quotaInfo = ref<{
-  current_count: number
-  max_files: number
-  remaining: number
-  over_limit: number
-  is_over_limit: boolean
+interface QuotaInfo {
+  current_page_count: number
+  max_pages: number
+  page_remaining: number
+  page_over_limit: number
+  page_is_over_limit: boolean
+  page_can_upload: boolean
+  page_percentage_used: number
+  monthly_file_count: number
+  max_monthly_files: number
+  monthly_remaining: number
+  monthly_can_upload: boolean
+  monthly_percentage_used: number
   can_upload: boolean
-  percentage_used: number
-} | null>(null)
-const loading = ref(false)
-const error = ref<string | null>(null)
-
-async function loadQuota() {
-  try {
-    loading.value = true
-    error.value = null
-    quotaInfo.value = await getQuota()
-  } catch (e: any) {
-    console.error('Failed to load quota:', e)
-    error.value = e?.message ?? 'Failed to load quota information'
-  } finally {
-    loading.value = false
-  }
 }
 
-onMounted(() => {
-  loadQuota()
-})
+const props = defineProps<{
+  quotaInfo: QuotaInfo | null
+  loading?: boolean
+}>()
+
+const { getQuota } = useQuota()
+const refreshing = ref(false)
+const error = ref<string | null>(null)
+const showConversionRates = ref(false)
+
+const isLoading = computed(() => props.loading ?? refreshing.value)
+
+async function refreshQuota() {
+  try {
+    refreshing.value = true
+    error.value = null
+    await getQuota()
+  } catch (e: any) {
+    console.error('Failed to refresh quota:', e)
+    error.value = e?.message ?? 'Failed to refresh quota information'
+  } finally {
+    refreshing.value = false
+  }
+}
 </script>
 
 <template>
@@ -40,8 +50,8 @@ onMounted(() => {
       <h2 class="font-semibold text-lg">Usage & Quota</h2>
       <UButton
         icon="i-heroicons-arrow-path"
-        :loading="loading"
-        @click="loadQuota"
+        :loading="isLoading"
+        @click="refreshQuota"
         variant="soft"
         size="sm"
       >
@@ -55,15 +65,18 @@ onMounted(() => {
 
     <div v-if="quotaInfo" class="space-y-4">
       <!-- Over Limit Warning Banner -->
-      <div v-if="quotaInfo.is_over_limit" class="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+      <div v-if="!quotaInfo!.can_upload" class="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
         <div class="flex items-start gap-3">
-
           <div>
-            <h3 class="font-semibold text-red-400 mb-1">Storage Limit Exceeded</h3>
-            <p class="text-sm text-red-300 mb-3">
-              Your account has <strong>{{ quotaInfo.current_count }} pages</strong> but your current plan allows only <strong>{{ quotaInfo.max_files }} pages</strong>.
-              You need to delete documents totaling <strong>{{ quotaInfo.over_limit }} page(s)</strong> before you can upload new ones.
-            </p>
+            <h3 class="font-semibold text-red-400 mb-1">Limit Exceeded</h3>
+            <div v-if="!quotaInfo!.page_can_upload" class="text-sm text-red-300 mb-3">
+              Your account has <strong>{{ quotaInfo!.current_page_count }} pages</strong> but your current plan allows only <strong>{{ quotaInfo!.max_pages }} pages</strong>.
+              You need to delete documents totaling <strong>{{ quotaInfo!.page_over_limit }} page(s)</strong> before you can upload new ones.
+            </div>
+            <div v-else-if="!quotaInfo!.monthly_can_upload" class="text-sm text-red-300 mb-3">
+              You have reached your monthly file upload limit of <strong>{{ quotaInfo!.max_monthly_files }} files</strong>.
+              You've already uploaded <strong>{{ quotaInfo!.monthly_file_count }} files</strong> this month. Please try again next month or upgrade to premium.
+            </div>
             <div class="flex gap-2">
               <UButton to="/dashboard" size="sm" color="error" variant="solid">
                 Manage Files
@@ -73,67 +86,127 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="flex items-stretch gap-6">
-        <div class="p-8 bg-zinc-900 rounded-lg border border-zinc-800 flex-1">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Page Storage Card -->
+        <div class="p-8 bg-zinc-900 rounded-lg border border-zinc-800">
           <div class="flex items-center justify-between mb-4">
-            <span class="text-base font-medium text-zinc-200">
-              Page Storage
-            </span>
+            <div class="flex items-center gap-2">
+              <span class="text-base font-medium text-zinc-200">
+                Page Storage
+              </span>
+              <UButton
+                icon="i-heroicons-question-mark-circle"
+                variant="ghost"
+                size="xs"
+                :padded="false"
+                @click="showConversionRates = true"
+              />
+            </div>
           </div>
 
           <div class="text-center mb-6">
             <div class="text-5xl font-bold mb-2" :class="{
-              'text-red-400': quotaInfo.is_over_limit || quotaInfo.remaining <= 5,
-              'text-orange-400': !quotaInfo.is_over_limit && quotaInfo.remaining <= 10 && quotaInfo.remaining > 5,
-              'text-white': !quotaInfo.is_over_limit && quotaInfo.remaining > 10
+              'text-red-400': quotaInfo!.page_is_over_limit || quotaInfo!.page_remaining <= 5,
+              'text-orange-400': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining <= 10 && quotaInfo!.page_remaining > 5,
+              'text-white': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining > 10
             }">
-              {{ quotaInfo.current_count }}
+              {{ quotaInfo!.current_page_count }}
             </div>
             <div class="text-base text-zinc-400">
-              of {{ quotaInfo.max_files }} pages
+              of {{ quotaInfo!.max_pages }} pages
             </div>
           </div>
 
           <UProgress
-            :model-value="quotaInfo.percentage_used"
-            :color="quotaInfo.is_over_limit || quotaInfo.remaining <= 5 ? 'error' : quotaInfo.remaining <= 10 ? 'warning' : 'primary'"
+            :model-value="quotaInfo!.page_percentage_used"
+            :color="quotaInfo!.page_is_over_limit || quotaInfo!.page_remaining <= 5 ? 'error' : quotaInfo!.page_remaining <= 10 ? 'warning' : 'primary'"
             size="lg"
           />
 
           <div class="mt-6 text-center">
             <span class="text-base" :class="{
-              'text-red-400': quotaInfo.is_over_limit || quotaInfo.remaining <= 5,
-              'text-orange-400': !quotaInfo.is_over_limit && quotaInfo.remaining <= 10 && quotaInfo.remaining > 5,
-              'text-zinc-400': !quotaInfo.is_over_limit && quotaInfo.remaining > 10
+              'text-red-400': quotaInfo!.page_is_over_limit || quotaInfo!.page_remaining <= 5,
+              'text-orange-400': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining <= 10 && quotaInfo!.page_remaining > 5,
+              'text-zinc-400': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining > 10
             }">
-              <template v-if="quotaInfo.is_over_limit">
-                {{ quotaInfo.over_limit }} pages over limit
+              <template v-if="quotaInfo!.page_is_over_limit">
+                {{ quotaInfo!.page_over_limit }} pages over limit
               </template>
               <template v-else>
-                {{ quotaInfo.remaining }} pages remaining
+                {{ quotaInfo!.page_remaining }} pages remaining
               </template>
             </span>
           </div>
 
-          <div v-if="!quotaInfo.is_over_limit && quotaInfo.remaining <= 5" class="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+          <div v-if="!quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining <= 5" class="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
             <p class="text-sm text-orange-400 text-center">
               You're running low on storage. Consider upgrading your plan to upload more pages.
             </p>
           </div>
         </div>
 
-        <USeparator orientation="vertical" class="h-auto self-stretch" size="lg"/>
+        <!-- Monthly File Upload Card -->
+        <div class="p-8 bg-zinc-900 rounded-lg border border-zinc-800">
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-base font-medium text-zinc-200">
+              Monthly Uploads
+            </span>
+          </div>
 
-        <div class="p-8 bg-zinc-900 rounded-lg border border-zinc-800 flex-1 flex flex-col items-center justify-center text-center">
-          <h3 class="text-lg font-semibold text-zinc-200 mb-3">Need more storage?</h3>
+          <div class="text-center mb-6">
+            <div class="text-5xl font-bold mb-2" :class="{
+              'text-red-400': !quotaInfo!.monthly_can_upload || quotaInfo!.monthly_remaining <= 3,
+              'text-orange-400': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining <= 5 && quotaInfo!.monthly_remaining > 3,
+              'text-white': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining > 5
+            }">
+              {{ quotaInfo!.monthly_file_count }}
+            </div>
+            <div class="text-base text-zinc-400">
+              of {{ quotaInfo!.max_monthly_files }} files
+            </div>
+          </div>
+
+          <UProgress
+            :model-value="quotaInfo!.monthly_percentage_used"
+            :color="!quotaInfo!.monthly_can_upload || quotaInfo!.monthly_remaining <= 3 ? 'error' : quotaInfo!.monthly_remaining <= 5 ? 'warning' : 'primary'"
+            size="lg"
+          />
+
+          <div class="mt-6 text-center">
+            <span class="text-base" :class="{
+              'text-red-400': !quotaInfo!.monthly_can_upload || quotaInfo!.monthly_remaining <= 3,
+              'text-orange-400': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining <= 5 && quotaInfo!.monthly_remaining > 3,
+              'text-zinc-400': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining > 5
+            }">
+              <template v-if="!quotaInfo!.monthly_can_upload">
+                Limit reached
+              </template>
+              <template v-else>
+                {{ quotaInfo!.monthly_remaining }} uploads remaining
+              </template>
+            </span>
+          </div>
+
+          <div v-if="quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining <= 5" class="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+            <p class="text-sm text-orange-400 text-center">
+              You're approaching your monthly upload limit. Upgrade to upload more files per month.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Upgrade CTA -->
+      <div class="p-8 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/30">
+        <div class="text-center">
+          <h3 class="text-lg font-semibold text-zinc-200 mb-3">Want higher limits?</h3>
           <p class="text-sm text-zinc-400 mb-6">
-            Upgrade to get <strong>2000 pages</strong> of storage
+            <strong>Premium Plan</strong> includes <strong>2000 pages</strong> of storage and <strong>500 monthly uploads</strong>
           </p>
           <UButton
             color="primary"
             variant="solid"
           >
-            Upgrade
+            Upgrade Now
           </UButton>
         </div>
       </div>
@@ -146,5 +219,28 @@ onMounted(() => {
     <div v-if="loading && !quotaInfo" class="flex items-center justify-center py-12">
       <UIcon name="i-heroicons-arrow-path" class="animate-spin text-2xl text-zinc-400" />
     </div>
+
+    <!-- Conversion Rates Modal -->
+    <UModal v-model:open="showConversionRates" title="Storage Conversion Rates">
+      <template #body>
+        <div class="space-y-4 text-zinc-300">
+          <div class="border-l-2 border-primary-500 pl-4">
+            <p class="font-medium text-white mb-1">PDF Pages</p>
+            <p class="text-sm">1 page in a PDF = 1 page of storage</p>
+          </div>
+
+          <div class="border-l-2 border-primary-500 pl-4">
+            <p class="font-medium text-white mb-1">Images</p>
+            <p class="text-sm">1 image = 1 page of storage</p>
+          </div>
+
+          <div class="border-l-2 border-primary-500 pl-4">
+            <p class="font-medium text-white mb-1">Videos</p>
+            <p class="text-sm">100 MB of video = 5 pages of storage</p>
+            <p class="text-xs text-zinc-400 mt-1">(Minimum 1 page per video)</p>
+          </div>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
