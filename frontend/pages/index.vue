@@ -167,7 +167,7 @@ onMounted(() => {
   <!-- Hero section -->
   <div class="hero-bg">
     <UPageHero
-      title="The Ultimate Smart Search Platform"
+      title="Cloud Based Semantic File Explorer"
       description="Use our Semantic Search technology and our agentic natural-language tools to find what you need, when you need it."
       headline="New Features Released"
     >
@@ -297,7 +297,9 @@ onMounted(() => {
 
 
 .hero-bg {
-  background: url('/indexbackground.jpg') no-repeat center bottom / cover;
+  background: url('/indexbackground.jpg') no-repeat center center / cover;
+  background-size: cover;
+  background-position: center;
   min-height: 70vh;
   display: flex;
   align-items: center;

@@ -2,7 +2,7 @@
 import { watch, ref, nextTick } from 'vue'
 import { marked } from 'marked'
 import { useFilesApi } from '~/composables/useFiles'
-const { getSignedUrl, getThumbnailUrl, getVideoInfo } = useFilesApi()
+const { getSignedUrl, getThumbnailUrl } = useFilesApi()
 const toast = useToast()
 
 const props = defineProps<{ results: any[], deleting?: boolean }>()
@@ -102,6 +102,38 @@ function getDisplayText(r: any): string {
 
 function getFileName(title?: string) {
   return title || '(unknown file)'
+}
+
+// Extract video filename for Ragie video chunks
+function getVideoFileName(r: any): string {
+  // Try to parse the text field which contains JSON with the context (filename)
+  if (r.metadata?.text) {
+    try {
+      const parsed = JSON.parse(r.metadata.text)
+      if (parsed.context) {
+        return parsed.context
+      }
+    } catch {
+      // If not JSON, continue to other methods
+    }
+  }
+
+  // Fall back to context field directly
+  if (r.metadata?.context) {
+    return r.metadata.context
+  }
+
+  // Fall back to title
+  if (r.metadata?.title) {
+    return r.metadata.title
+  }
+
+  // Extract from storage path if available
+  if (r.metadata?.storage_path) {
+    return r.metadata.storage_path.split('/').pop() || '(unknown video)'
+  }
+
+  return '(unknown video)'
 }
 
 // Builds URLs for deep linking
@@ -237,30 +269,16 @@ async function handlePlayVideo(r: any, timestamp: number) {
   videoStartTime.value = timestamp
 
   try {
-    let url: string | null = null
+    // Use the exact same logic as handleOpen - just with modal instead of new tab
+    let bucket = r.metadata.bucket
+    let storagePath = r.metadata.storage_path
 
-    // Check if this is a Ragie video chunk (from Supabase storage)
-    if (r.metadata?.chunk_content_type === 'video' && r.metadata?.bucket === 'supabase') {
-      // Get signed URL directly from Supabase
-      url = await getSignedUrl(r.metadata.bucket, r.metadata.storage_path, false)
-      videoFilename.value = r.metadata?.title || 'Video'
-    } else {
-      // Legacy video frame hit or other video sources
-      const videoId = r.metadata?.video_id
-      if (!videoId) {
-        throw new Error('Video ID not found in result metadata')
-      }
-
-      const info = await getVideoInfo(videoId)
-      videoFilename.value = info.filename || 'Video'
-
-      // Get signed URL for the video
-      url = await getSignedUrl(info.bucket, info.storage_path, false)
-    }
-
+    // Get signed URL (same as handleOpen)
+    const url = await getSignedUrl(bucket, storagePath, false)
     if (!url) throw new Error('No URL returned')
 
     videoUrl.value = url
+    videoFilename.value = r.metadata?.title || 'Video'
 
     // Wait for next tick to ensure video element is rendered, then seek
     await nextTick()
@@ -306,6 +324,41 @@ function truncateText(text: string, maxLen: number): string {
   return text.length > maxLen ? text.substring(0, maxLen) + '...' : text
 }
 
+// Parse transcript data if it's JSON
+function getTranscriptText(data: any): string {
+  if (!data) return ''
+
+  // If it's a string that looks like JSON, parse it
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data)
+      // Return audio_transcript if it exists and is not empty, otherwise video_description
+      if (parsed.audio_transcript) {
+        return parsed.audio_transcript
+      }
+      if (parsed.video_description) {
+        return parsed.video_description
+      }
+      return ''
+    } catch {
+      // If it's not valid JSON, return as-is
+      return data
+    }
+  }
+
+  // If it's already an object
+  if (typeof data === 'object') {
+    if (data.audio_transcript) {
+      return data.audio_transcript
+    }
+    if (data.video_description) {
+      return data.video_description
+    }
+  }
+
+  return ''
+}
+
 // ========== Auto Fetch Thumbnail URLs for Images and PDFs ==========
 
 // Cache to prevent duplicate fetches (key: bucket+path)
@@ -319,6 +372,18 @@ watch(
     if (!newResults?.length) return
     for (const r of newResults) {
       const modality = (r.metadata?.modality || '').toLowerCase()
+
+      // Debug: log video chunks
+      if (r.metadata?.chunk_content_type) {
+        console.log('[ResultList] Video chunk metadata:', {
+          chunk_id: r.chunk_id,
+          chunk_content_type: r.metadata?.chunk_content_type,
+          thumbnail_url: r.metadata?.thumbnail_url,
+          bucket: r.metadata?.bucket,
+          has_thumbnail_signed_url: !!r.metadata?.thumbnail_signed_url,
+          all_metadata_keys: Object.keys(r.metadata || {})
+        })
+      }
 
       // For images, fetch thumbnail URL
       if (modality === 'image' && !r.metadata?.signed_url) {
@@ -411,8 +476,8 @@ watch(
         }
       }
 
-      // For Ragie video chunks from Supabase, pre-fetch signed URL for caching
-      if (r.metadata?.chunk_content_type === 'video' && r.metadata?.bucket === 'supabase' && !r.metadata?.signed_url) {
+      // For video files with storage path, pre-fetch signed URL for caching
+      if (r.metadata?.bucket === 'videos' && r.metadata?.storage_path && !r.metadata?.signed_url) {
         const cacheKey = `${r.metadata.bucket}:${r.metadata.storage_path}`
 
         // Check cache first
@@ -441,6 +506,39 @@ watch(
           pendingFetches.value.delete(cacheKey)
         }
       }
+
+      // For video chunks with thumbnail_url, fetch the thumbnail
+      if (r.metadata?.chunk_content_type === 'video' && r.metadata?.thumbnail_url && !r.metadata?.thumbnail_signed_url) {
+        // Check if it's already a signed URL or needs to be fetched
+        if (r.metadata.thumbnail_url.startsWith('http')) {
+          r.metadata.thumbnail_signed_url = r.metadata.thumbnail_url
+        } else {
+          // It's a storage path, fetch signed URL
+          const cacheKey = `thumbnail:${r.metadata.bucket}:${r.metadata.thumbnail_url}`
+
+          // Check cache first
+          if (urlCache.value.has(cacheKey)) {
+            r.metadata.thumbnail_signed_url = urlCache.value.get(cacheKey)
+            continue
+          }
+
+          // Skip if already fetching
+          if (pendingFetches.value.has(cacheKey)) continue
+
+          try {
+            pendingFetches.value.add(cacheKey)
+            const thumbUrl = await getThumbnailUrl(r.metadata.bucket, r.metadata.thumbnail_url)
+            if (thumbUrl) {
+              r.metadata.thumbnail_signed_url = thumbUrl
+              urlCache.value.set(cacheKey, thumbUrl)
+            }
+          } catch (err) {
+            console.error('Failed to get thumbnail URL for video chunk', r.metadata.thumbnail_url, err)
+          } finally {
+            pendingFetches.value.delete(cacheKey)
+          }
+        }
+      }
     }
   },
   { immediate: true }
@@ -461,8 +559,12 @@ watch(
       <template #header>
         <div class="flex items-center justify-between w-full">
           <h3 class="font-semibold truncate">
+            <!-- Show video filename for video chunks -->
+            <span v-if="r.metadata?.chunk_content_type === 'video'">
+              {{ getVideoFileName(r) }}
+            </span>
             <!-- Show parent document name for extracted images -->
-            <span v-if="r.metadata?.source === 'extracted' && r.metadata?.parent_filename">
+            <span v-else-if="r.metadata?.source === 'extracted' && r.metadata?.parent_filename">
               {{ r.metadata.parent_filename }}
               <span v-if="r.metadata?.page_number" class="text-sm font-normal text-gray-500">(Page {{ r.metadata.page_number }})</span>
             </span>
@@ -644,40 +746,44 @@ watch(
 
         <!-- Render Ragie video chunks (from Supabase storage) -->
         <div v-else-if="r.metadata?.chunk_content_type === 'video'">
-          <!-- Time Range Badge -->
-          <div class="mb-3 flex gap-2 items-center">
-            <UBadge color="primary" variant="soft" size="sm">
-              {{ formatTime(r.metadata?.start_time || 0) }} - {{ formatTime(r.metadata?.end_time || 0) }}
-            </UBadge>
-            <span class="text-xs text-gray-500">
-              {{ ((r.metadata?.end_time || 0) - (r.metadata?.start_time || 0)).toFixed(0) }}s clip
-            </span>
+          <!-- Video Thumbnail with Play Button Overlay -->
+          <div v-if="r.metadata?.thumbnail_signed_url" class="relative group mb-3">
+            <img
+              :src="r.metadata.thumbnail_signed_url"
+              :alt="`Video thumbnail at ${formatTime(r.metadata?.start_time || 0)}`"
+              class="object-contain w-full max-h-96 rounded-md border border-gray-200 dark:border-gray-800"
+            />
+            <!-- Play Button Overlay -->
+            <div class="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 group-hover:bg-black/30 transition-all">
+              <UButton
+                icon="i-heroicons-play-solid"
+                color="primary"
+                size="lg"
+                square
+                @click="handlePlayVideo(r, r.metadata?.start_time || 0)"
+              />
+            </div>
+            <!-- Time Badge -->
+            <div class="absolute bottom-2 left-2 flex gap-2 items-center">
+              <UBadge color="primary" variant="solid" size="sm">
+                {{ formatTime(r.metadata?.start_time || 0) }}
+              </UBadge>
+            </div>
           </div>
 
           <!-- Transcription -->
-          <div class="bg-gray-50 dark:bg-gray-900 p-3 rounded-md border border-gray-200 dark:border-gray-800 mb-3">
-            <p class="text-sm text-gray-700 dark:text-gray-300">
-              <strong>Transcript:</strong> "{{ truncateText(r.metadata?.audio_transcript || r.metadata?.text, 250) }}"
-            </p>
+          <div v-if="getTranscriptText(r.metadata?.audio_transcript || r.metadata?.text)" class="p-3 rounded-md border border-gray-300 dark:border-gray-700 mb-3">
+            <div
+              v-html="renderMarkdown(getTranscriptText(r.metadata?.audio_transcript || r.metadata?.text))"
+              class="prose prose-sm max-w-none dark:prose-invert prose-headings:mt-2 prose-headings:mb-1 prose-p:my-1 prose-ul:my-1 prose-li:my-0"
+            ></div>
           </div>
 
           <!-- Video Description -->
-          <div v-if="r.metadata?.video_description" class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md border border-blue-200 dark:border-blue-800 mb-3">
-            <p class="text-sm text-blue-700 dark:text-blue-300">
+          <div v-if="r.metadata?.video_description" class="p-3 rounded-md border border-gray-300 dark:border-gray-700 mb-3">
+            <p class="text-sm text-gray-900 dark:text-gray-100">
               <strong>Visual:</strong> {{ truncateText(r.metadata?.video_description, 250) }}
             </p>
-          </div>
-
-          <!-- Play Button -->
-          <div class="flex gap-2">
-            <UButton
-              size="sm"
-              color="primary"
-              icon="i-heroicons-play"
-              @click="handlePlayVideo(r, r.metadata?.start_time || 0)"
-            >
-              Play from {{ formatTime(r.metadata?.start_time || 0) }}
-            </UButton>
           </div>
         </div>
 

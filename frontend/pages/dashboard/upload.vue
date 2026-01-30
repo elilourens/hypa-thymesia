@@ -153,7 +153,7 @@ async function doUpload(): Promise<void> {
   <BodyCard>
     <h1 class="font-semibold text-lg mb-4">Upload Files</h1>
 
-    <div class="flex items-start gap-6">
+    <div class="flex flex-col lg:flex-row lg:items-start gap-6">
       <!-- Left side: Files -->
       <div class="space-y-5">
         <UFileUpload
@@ -168,7 +168,7 @@ async function doUpload(): Promise<void> {
       </div>
 
       <!-- Divider -->
-      <USeparator orientation="vertical" class="h-auto self-stretch" size="lg"/>
+      <USeparator orientation="vertical" class="hidden lg:block h-auto self-stretch" size="lg"/>
 
       <!-- Right side: Groups and Upload -->
       <div class="flex-1 space-y-3">

@@ -12,11 +12,12 @@ class VideoUploadResponse(BaseModel):
     storage_path: str
     file_size_bytes: int
     duration_seconds: Optional[float] = None
-    processing_status: str
+    processing_status: str  # Maps to ragie_documents.status
     created_at: datetime
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class VideoChunkResponse(BaseModel):
@@ -48,6 +49,7 @@ class VideoResponse(BaseModel):
     chunk_count: Optional[int] = None
     group_id: Optional[str] = None
     group_name: Optional[str] = None
+    thumbnail_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

@@ -31,7 +31,7 @@ const active = computed<string>({
   <div class="mx-auto">
     <!-- full-width bar styled with Nuxt UI tokens -->
     <div class="border-b border-default">
-      <div class="mx-[5%] py-2">
+      <div class="mx-10 2xl:max-w-7xl 2xl:mx-auto py-2">
         <UTabs
           v-model="active"
           :items="items"

@@ -161,7 +161,7 @@ const columns: TableColumn<DocumentItem>[] = [
     accessorKey: 'filename',
     header: sortHeader('Name', 'filename'),
     cell: ({ row }) =>
-      h('div', { class: 'truncate' }, [
+      h('div', { class: 'max-w-xs truncate' }, [
         h('div', { class: 'font-medium truncate', title: row.original.filename }, row.original.filename),
         h('div', { class: 'text-xs text-muted truncate' }, prettyMime(row.original.mime_type))
       ])

@@ -55,19 +55,27 @@ async def retrieve(
                 if doc_id:
                     # Check if this is a video document stored in Supabase
                     is_video = metadata.get("chunk_content_type") == "video"
+                    logger.info(f"Chunk {doc_id}: chunk_content_type={metadata.get('chunk_content_type')}, is_video={is_video}")
 
                     if is_video:
-                        # Video chunks: get storage path from Supabase videos table
+                        # Video chunks: get storage path and thumbnail from Supabase
                         try:
                             from core.deps import get_supabase
                             supabase = get_supabase()
-                            video_response = supabase.table("videos").select(
-                                "storage_path"
+
+                            # Get video document info
+                            video_response = supabase.table("ragie_documents").select(
+                                "id, storage_path, storage_bucket"
                             ).eq("ragie_document_id", str(doc_id)).single().execute()
 
                             if video_response.data:
-                                metadata["bucket"] = "supabase"
+                                metadata["bucket"] = video_response.data.get("storage_bucket", "videos")
                                 metadata["storage_path"] = video_response.data["storage_path"]
+
+                                # Thumbnail is stored in videos bucket under thumbnails/{ragie_documents.id}.jpg
+                                supabase_doc_id = video_response.data.get("id")
+                                metadata["thumbnail_url"] = f"thumbnails/{supabase_doc_id}.jpg"
+                                logger.info(f"Set thumbnail_url for document {doc_id}: {metadata['thumbnail_url']}")
                             else:
                                 # Fallback to Ragie if not found in Supabase
                                 metadata["bucket"] = "ragie"

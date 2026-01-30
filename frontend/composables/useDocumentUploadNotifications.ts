@@ -93,7 +93,7 @@ export function useDocumentUploadNotifications() {
         toast.add({
           id: toastId,
           title: 'Processing complete',
-          description: `${filename} is ready to use`,
+          description: `${filename} is ready${fileType === 'video' ? ' to watch' : ' to use'}`,
           color: 'success',
           icon: 'i-lucide-check-circle',
         })

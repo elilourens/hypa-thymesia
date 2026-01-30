@@ -7,12 +7,18 @@ from supabase import Client
 
 from core import get_current_user, AuthUser
 from core.deps import get_supabase, get_ragie_service
-from core.user_limits import check_user_can_upload, get_user_quota_status, add_to_user_monthly_throughput
+from core.user_limits import check_user_can_upload, get_user_quota_status, add_to_user_monthly_throughput, add_to_user_monthly_file_count
 from services.ragie_service import RagieService
+from services.video_service import VideoService
 from schemas import DocumentResponse, DocumentListResponse, DocumentDeleteResponse, DocumentStatusResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+def get_video_service(supabase: Client = Depends(get_supabase), ragie_service: RagieService = Depends(get_ragie_service)) -> VideoService:
+    """Dependency to get video service."""
+    return VideoService(supabase, ragie_service)
 
 
 @router.post("/upload", response_model=DocumentResponse)
@@ -65,8 +71,9 @@ async def upload_document(
 
         doc = doc_record.data[0]
 
-        # Track upload throughput
+        # Track upload throughput and file count
         add_to_user_monthly_throughput(supabase, current_user.id, file_size)
+        add_to_user_monthly_file_count(supabase, current_user.id)
 
         # Fetch group name if document has a group
         group_name = None
@@ -238,6 +245,7 @@ async def delete_document(
     current_user: AuthUser = Depends(get_current_user),
     ragie_service: RagieService = Depends(get_ragie_service),
     supabase: Client = Depends(get_supabase),
+    video_service: VideoService = Depends(get_video_service),
 ):
     """Delete a document."""
     try:
@@ -251,16 +259,22 @@ async def delete_document(
 
         doc = response.data
 
-        # Delete from Ragie
-        if doc.get("ragie_document_id"):
-            try:
-                await ragie_service.delete_document(doc["ragie_document_id"])
-            except Exception as e:
-                logger.warning(f"Failed to delete from Ragie: {e}")
-                # Continue with database deletion anyway
+        # Check if this is a video document (has storage_bucket field)
+        if doc.get("storage_bucket"):
+            # Use VideoService for video deletion (handles storage cleanup)
+            await video_service.delete_document(doc_id, current_user.id)
+        else:
+            # Regular document deletion
+            # Delete from Ragie
+            if doc.get("ragie_document_id"):
+                try:
+                    await ragie_service.delete_document(doc["ragie_document_id"])
+                except Exception as e:
+                    logger.warning(f"Failed to delete from Ragie: {e}")
+                    # Continue with database deletion anyway
 
-        # Delete from database
-        supabase.table("ragie_documents").delete().eq("id", doc_id).execute()
+            # Delete from database
+            supabase.table("ragie_documents").delete().eq("id", doc_id).execute()
 
         return DocumentDeleteResponse(
             message="Document deleted successfully",

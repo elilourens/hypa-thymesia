@@ -121,15 +121,19 @@ async def get_ragie_file(
     """
     try:
         # Verify document exists in Ragie
+        logger.info(f"Fetching document status for {doc_id}")
         doc = await ragie_service.get_document_status(doc_id)
+        logger.info(f"Document {doc_id} status check passed, fetching source")
 
         # Call Ragie's document source API
         ragie_api_url = f"https://api.ragie.ai/documents/{doc_id}/source"
         headers = {"Authorization": f"Bearer {settings.ragie_api_key}"}
+        logger.info(f"Calling Ragie source API: {ragie_api_url}")
 
         try:
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(ragie_api_url, headers=headers)
+                logger.info(f"Ragie API response status: {response.status_code}")
                 response.raise_for_status()
 
                 # Stream the file back to the client
@@ -143,15 +147,18 @@ async def get_ragie_file(
                         )
                     }
                 )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Ragie API HTTP error for {doc_id}: status={e.response.status_code}, detail={e.response.text}")
+            raise HTTPException(status_code=500, detail=f"Ragie API error: {e.response.status_code}")
         except httpx.HTTPError as e:
-            logger.error(f"Error fetching from Ragie API: {e}")
+            logger.error(f"Ragie API request error for {doc_id}: {type(e).__name__}: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to retrieve file from Ragie")
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in get_ragie_file: {e}")
-        raise HTTPException(status_code=404, detail="File not found")
+        logger.error(f"Error in get_ragie_file for {doc_id}: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="File processing failed")
 
 
 @router.get("/video-info/{doc_id}")
@@ -174,7 +181,7 @@ async def get_video_info(
     try:
         # Fetch document from database
         response = supabase.table("ragie_documents").select(
-            "id, filename, bucket, storage_path, mime_type, ragie_document_id"
+            "id, filename, storage_bucket, storage_path, mime_type, ragie_document_id"
         ).eq("id", doc_id).eq("user_id", current_user.id).single().execute()
 
         if not response.data:
@@ -183,7 +190,7 @@ async def get_video_info(
         doc = response.data
 
         # Use Ragie as the bucket for Ragie-stored documents
-        bucket = doc.get("bucket") or "ragie"
+        bucket = doc.get("storage_bucket") or "ragie"
         storage_path = doc.get("storage_path") or doc.get("ragie_document_id", "")
 
         return {

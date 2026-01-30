@@ -1,13 +1,14 @@
 """Video management endpoints."""
 
 import logging
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
 from supabase import Client
 
 from core import get_current_user, AuthUser
 from core.deps import get_supabase, get_ragie_service
-from core.user_limits import check_user_can_upload
+from core.user_limits import check_user_can_upload, add_to_user_monthly_throughput, add_to_user_monthly_file_count
 from services.video_service import VideoService
 from services.ragie_service import RagieService
 from schemas.video import (
@@ -20,6 +21,29 @@ from schemas.video import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+
+def _process_video_background(
+    video_service: VideoService,
+    video_id: str,
+    user_id: str,
+    temp_file_path: Optional[str],
+    thumbnail_path: Optional[str]
+):
+    """Sync wrapper for async video processing (for background tasks)."""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(
+            video_service.process_video_with_ragie(
+                video_id=video_id,
+                user_id=user_id,
+                temp_file_path=temp_file_path,
+                thumbnail_path=thumbnail_path
+            )
+        )
+    except Exception as e:
+        logger.error(f"Background task failed for video {video_id}: {e}")
 
 
 def get_video_service(supabase: Client = Depends(get_supabase), ragie_service: RagieService = Depends(get_ragie_service)) -> VideoService:
@@ -42,9 +66,14 @@ async def upload_video(
         if not file.filename.endswith(".mp4"):
             raise HTTPException(status_code=400, detail="Only MP4 files are supported")
 
-        # Check user quota
+        # Get file size before upload
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+
+        # Check user quota with file size
         try:
-            check_user_can_upload(supabase, current_user.id)
+            check_user_can_upload(supabase, current_user.id, file_size_bytes=file_size)
         except HTTPException:
             raise
 
@@ -55,16 +84,33 @@ async def upload_video(
             group_id=group_id
         )
 
+        # Track upload throughput and file count
+        add_to_user_monthly_throughput(supabase, current_user.id, file_size)
+        add_to_user_monthly_file_count(supabase, current_user.id)
+
         # Queue background task for Ragie processing
         temp_file_path = result.pop("_temp_file_path", None)
+        thumbnail_path = result.pop("_thumbnail_path", None)
+        logger.info(f"Queueing background task for video {result['id']}")
         background_tasks.add_task(
-            video_service.process_video_with_ragie,
+            _process_video_background,
+            video_service,
             result["id"],
             current_user.id,
-            temp_file_path
+            temp_file_path,
+            thumbnail_path
         )
 
-        return VideoUploadResponse(**result)
+        # Map status -> processing_status for response
+        return VideoUploadResponse(
+            id=result["id"],
+            filename=result["filename"],
+            storage_path=result["storage_path"],
+            file_size_bytes=result["file_size_bytes"],
+            duration_seconds=result.get("duration_seconds"),
+            processing_status=result["processing_status"],  # From ragie_documents.status
+            created_at=result["created_at"]
+        )
 
     except HTTPException:
         raise
@@ -83,37 +129,37 @@ async def list_videos(
     current_user: AuthUser = Depends(get_current_user),
     supabase: Client = Depends(get_supabase)
 ):
-    """List user's videos with filtering and pagination."""
+    """List user's videos (from ragie_documents) with filtering and pagination."""
     try:
-        # Query videos
-        query = supabase.table("videos").select("*").eq("user_id", current_user.id)
+        # Query ragie_documents
+        query = supabase.table("ragie_documents").select("*").eq("user_id", current_user.id)
 
         if group_id:
             query = query.eq("group_id", group_id)
 
         # Execute query
         response = query.execute()
-        all_videos = response.data or []
+        all_docs = response.data or []
 
         # Sort results
         desc = dir == "desc"
         if sort == "created_at":
-            all_videos.sort(key=lambda x: x["created_at"], reverse=desc)
+            all_docs.sort(key=lambda x: x["created_at"], reverse=desc)
         elif sort == "filename":
-            all_videos.sort(key=lambda x: x["filename"].lower(), reverse=desc)
+            all_docs.sort(key=lambda x: x["filename"].lower(), reverse=desc)
         elif sort == "duration_seconds":
-            all_videos.sort(key=lambda x: x.get("duration_seconds") or 0, reverse=desc)
+            all_docs.sort(key=lambda x: x.get("duration_seconds") or 0, reverse=desc)
 
         # Get total count
-        total_count = len(all_videos)
+        total_count = len(all_docs)
 
         # Apply pagination
         offset = (page - 1) * page_size
-        paginated_videos = all_videos[offset:offset + page_size]
+        paginated_docs = all_docs[offset:offset + page_size]
 
         # Fetch group names
         group_names = {}
-        group_ids = {v.get("group_id") for v in paginated_videos if v.get("group_id")}
+        group_ids = {d.get("group_id") for d in paginated_docs if d.get("group_id")}
         if group_ids:
             groups_response = supabase.table("app_groups").select("group_id, name").eq(
                 "user_id", current_user.id
@@ -123,22 +169,23 @@ async def list_videos(
         # Format response
         videos = [
             VideoResponse(
-                id=v["id"],
-                filename=v["filename"],
-                storage_path=v["storage_path"],
-                file_size_bytes=v["file_size_bytes"],
-                duration_seconds=v.get("duration_seconds"),
-                fps=v.get("fps"),
-                width=v.get("width"),
-                height=v.get("height"),
-                processing_status=v["processing_status"],
-                chunk_count=v.get("chunk_count"),
-                group_id=v.get("group_id"),
-                group_name=group_names.get(v.get("group_id")) if v.get("group_id") else None,
-                created_at=v["created_at"],
-                updated_at=v["updated_at"]
+                id=d["id"],
+                filename=d["filename"],
+                storage_path=d["storage_path"],
+                file_size_bytes=d["file_size_bytes"],
+                duration_seconds=d.get("duration_seconds"),
+                fps=d.get("fps"),
+                width=d.get("width"),
+                height=d.get("height"),
+                processing_status=d["status"],
+                chunk_count=d.get("chunk_count"),
+                group_id=d.get("group_id"),
+                group_name=group_names.get(d.get("group_id")) if d.get("group_id") else None,
+                created_at=d["created_at"],
+                updated_at=d["updated_at"],
+                thumbnail_url=None
             )
-            for v in paginated_videos
+            for d in paginated_docs
         ]
 
         has_more = (offset + page_size) < total_count
@@ -160,47 +207,90 @@ async def get_video(
     current_user: AuthUser = Depends(get_current_user),
     supabase: Client = Depends(get_supabase)
 ):
-    """Get a specific video."""
+    """Get a specific video (from ragie_documents)."""
     try:
-        response = supabase.table("videos").select("*").eq("id", video_id).eq(
+        response = supabase.table("ragie_documents").select("*").eq("id", video_id).eq(
             "user_id", current_user.id
         ).single().execute()
 
         if not response.data:
             raise HTTPException(status_code=404, detail="Video not found")
 
-        v = response.data
+        doc = response.data
 
         # Fetch group name if applicable
         group_name = None
-        if v.get("group_id"):
+        if doc.get("group_id"):
             group_response = supabase.table("app_groups").select("name").eq(
-                "group_id", v["group_id"]
+                "group_id", doc["group_id"]
             ).eq("user_id", current_user.id).single().execute()
             if group_response.data:
                 group_name = group_response.data.get("name")
 
         return VideoResponse(
-            id=v["id"],
-            filename=v["filename"],
-            storage_path=v["storage_path"],
-            file_size_bytes=v["file_size_bytes"],
-            duration_seconds=v.get("duration_seconds"),
-            fps=v.get("fps"),
-            width=v.get("width"),
-            height=v.get("height"),
-            processing_status=v["processing_status"],
-            chunk_count=v.get("chunk_count"),
-            group_id=v.get("group_id"),
+            id=doc["id"],
+            filename=doc["filename"],
+            storage_path=doc["storage_path"],
+            file_size_bytes=doc["file_size_bytes"],
+            duration_seconds=doc.get("duration_seconds"),
+            fps=doc.get("fps"),
+            width=doc.get("width"),
+            height=doc.get("height"),
+            processing_status=doc["status"],
+            chunk_count=doc.get("chunk_count"),
+            group_id=doc.get("group_id"),
             group_name=group_name,
-            created_at=v["created_at"],
-            updated_at=v["updated_at"]
+            thumbnail_url=None,
+            created_at=doc["created_at"],
+            updated_at=doc["updated_at"]
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting video: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{video_id}/chunks", response_model=list)
+async def get_video_chunks(
+    video_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+    video_service: VideoService = Depends(get_video_service)
+):
+    """Get video chunks with signed thumbnail URLs (from ragie_documents)."""
+    try:
+        # Verify user owns the document
+        doc_response = supabase.table("ragie_documents").select("id").eq("id", video_id).eq(
+            "user_id", current_user.id
+        ).single().execute()
+
+        if not doc_response.data:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        # Get chunks by ragie_document_id
+        chunks_response = supabase.table("video_chunks").select("*").eq(
+            "ragie_document_id", video_id
+        ).order("chunk_index", desc=False).execute()
+
+        chunks = chunks_response.data or []
+
+        # Generate signed URLs for thumbnails
+        for chunk in chunks:
+            if chunk.get("thumbnail_url"):
+                signed_url = video_service.get_signed_thumbnail_url(
+                    chunk["thumbnail_url"],
+                    expires_in=3600
+                )
+                chunk["thumbnail_url"] = signed_url
+
+        return chunks
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting video chunks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -211,7 +301,7 @@ async def get_video_signed_url(
     current_user: AuthUser = Depends(get_current_user),
     video_service: VideoService = Depends(get_video_service)
 ):
-    """Get signed URL for video streaming."""
+    """Get signed URL for video streaming (from ragie_documents)."""
     try:
         url = await video_service.get_signed_video_url(
             video_id=video_id,
@@ -225,6 +315,8 @@ async def get_video_signed_url(
         )
 
     except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Video not found")
         logger.error(f"Error getting signed URL: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -233,37 +325,19 @@ async def get_video_signed_url(
 async def delete_video(
     video_id: str,
     current_user: AuthUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    video_service: VideoService = Depends(get_video_service)
 ):
-    """Delete a video and its chunks."""
+    """Delete a video (ragie_documents record) and all associated files."""
     try:
-        # Verify user owns the video
-        video_response = supabase.table("videos").select("*").eq("id", video_id).eq(
-            "user_id", current_user.id
-        ).single().execute()
-
-        if not video_response.data:
-            raise HTTPException(status_code=404, detail="Video not found")
-
-        video = video_response.data
-
-        # Delete from Supabase Storage
-        try:
-            supabase.storage.from_("videos").remove([video["storage_path"]])
-        except Exception as e:
-            logger.warning(f"Failed to delete video from storage: {e}")
-            # Continue with database deletion anyway
-
-        # Delete video record (chunks cascade delete automatically)
-        supabase.table("videos").delete().eq("id", video_id).execute()
+        await video_service.delete_document(video_id, current_user.id)
 
         return VideoDeleteResponse(
             message="Video deleted successfully",
             video_id=video_id
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Video not found")
         logger.error(f"Error deleting video: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -147,7 +147,7 @@ export function useVideos() {
         onUpdate(status)
       }
 
-      if (status.processing_status === 'completed' || status.processing_status === 'failed') {
+      if (status.processing_status === 'completed' || status.processing_status === 'ready' || status.processing_status === 'failed') {
         return status
       }
 

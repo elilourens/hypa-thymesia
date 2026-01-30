@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useQuota } from '@/composables/useQuota'
 
 interface QuotaInfo {
@@ -19,7 +19,7 @@ interface QuotaInfo {
 }
 
 const props = defineProps<{
-  quotaInfo: QuotaInfo | null
+  quotaInfo?: QuotaInfo | null
   loading?: boolean
 }>()
 
@@ -27,14 +27,24 @@ const { getQuota } = useQuota()
 const refreshing = ref(false)
 const error = ref<string | null>(null)
 const showConversionRates = ref(false)
+const showMonthlyLimits = ref(false)
+const localQuotaInfo = ref<QuotaInfo | null>(props.quotaInfo ?? null)
 
 const isLoading = computed(() => props.loading ?? refreshing.value)
+const displayQuotaInfo = computed(() => localQuotaInfo.value ?? props.quotaInfo)
+
+onMounted(() => {
+  if (props.quotaInfo) {
+    localQuotaInfo.value = props.quotaInfo
+  }
+})
 
 async function refreshQuota() {
   try {
     refreshing.value = true
     error.value = null
-    await getQuota()
+    const updatedQuota = await getQuota()
+    localQuotaInfo.value = updatedQuota
   } catch (e: any) {
     console.error('Failed to refresh quota:', e)
     error.value = e?.message ?? 'Failed to refresh quota information'
@@ -63,19 +73,19 @@ async function refreshQuota() {
       {{ error }}
     </div>
 
-    <div v-if="quotaInfo" class="space-y-4">
+    <div v-if="displayQuotaInfo" class="space-y-4">
       <!-- Over Limit Warning Banner -->
-      <div v-if="!quotaInfo!.can_upload" class="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+      <div v-if="!displayQuotaInfo!.can_upload" class="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
         <div class="flex items-start gap-3">
           <div>
             <h3 class="font-semibold text-red-400 mb-1">Limit Exceeded</h3>
-            <div v-if="!quotaInfo!.page_can_upload" class="text-sm text-red-300 mb-3">
-              Your account has <strong>{{ quotaInfo!.current_page_count }} pages</strong> but your current plan allows only <strong>{{ quotaInfo!.max_pages }} pages</strong>.
-              You need to delete documents totaling <strong>{{ quotaInfo!.page_over_limit }} page(s)</strong> before you can upload new ones.
+            <div v-if="!displayQuotaInfo!.page_can_upload" class="text-sm text-red-300 mb-3">
+              Your account has <strong>{{ displayQuotaInfo!.current_page_count }} pages</strong> but your current plan allows only <strong>{{ displayQuotaInfo!.max_pages }} pages</strong>.
+              You need to delete documents totaling <strong>{{ displayQuotaInfo!.page_over_limit }} page(s)</strong> before you can upload new ones.
             </div>
-            <div v-else-if="!quotaInfo!.monthly_can_upload" class="text-sm text-red-300 mb-3">
-              You have reached your monthly file upload limit of <strong>{{ quotaInfo!.max_monthly_files }} files</strong>.
-              You've already uploaded <strong>{{ quotaInfo!.monthly_file_count }} files</strong> this month. Please try again next month or upgrade to premium.
+            <div v-else-if="!displayQuotaInfo!.monthly_can_upload" class="text-sm text-red-300 mb-3">
+              You have reached your monthly file upload limit of <strong>{{ displayQuotaInfo!.max_monthly_files }} files</strong>.
+              You've already uploaded <strong>{{ displayQuotaInfo!.monthly_file_count }} files</strong> this month. Please try again next month or upgrade to premium.
             </div>
             <div class="flex gap-2">
               <UButton to="/dashboard" size="sm" color="error" variant="solid">
@@ -106,39 +116,39 @@ async function refreshQuota() {
 
           <div class="text-center mb-6">
             <div class="text-5xl font-bold mb-2" :class="{
-              'text-red-400': quotaInfo!.page_is_over_limit || quotaInfo!.page_remaining <= 5,
-              'text-orange-400': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining <= 10 && quotaInfo!.page_remaining > 5,
-              'text-white': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining > 10
+              'text-red-400': displayQuotaInfo!.page_is_over_limit || displayQuotaInfo!.page_remaining <= 5,
+              'text-orange-400': !displayQuotaInfo!.page_is_over_limit && displayQuotaInfo!.page_remaining <= 10 && displayQuotaInfo!.page_remaining > 5,
+              'text-white': !displayQuotaInfo!.page_is_over_limit && displayQuotaInfo!.page_remaining > 10
             }">
-              {{ quotaInfo!.current_page_count }}
+              {{ displayQuotaInfo!.current_page_count }}
             </div>
             <div class="text-base text-zinc-400">
-              of {{ quotaInfo!.max_pages }} pages
+              of {{ displayQuotaInfo!.max_pages }} pages
             </div>
           </div>
 
           <UProgress
-            :model-value="quotaInfo!.page_percentage_used"
-            :color="quotaInfo!.page_is_over_limit || quotaInfo!.page_remaining <= 5 ? 'error' : quotaInfo!.page_remaining <= 10 ? 'warning' : 'primary'"
+            :model-value="displayQuotaInfo!.page_percentage_used"
+            :color="displayQuotaInfo!.page_is_over_limit || displayQuotaInfo!.page_remaining <= 5 ? 'error' : displayQuotaInfo!.page_remaining <= 10 ? 'warning' : 'primary'"
             size="lg"
           />
 
           <div class="mt-6 text-center">
             <span class="text-base" :class="{
-              'text-red-400': quotaInfo!.page_is_over_limit || quotaInfo!.page_remaining <= 5,
-              'text-orange-400': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining <= 10 && quotaInfo!.page_remaining > 5,
-              'text-zinc-400': !quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining > 10
+              'text-red-400': displayQuotaInfo!.page_is_over_limit || displayQuotaInfo!.page_remaining <= 5,
+              'text-orange-400': !displayQuotaInfo!.page_is_over_limit && displayQuotaInfo!.page_remaining <= 10 && displayQuotaInfo!.page_remaining > 5,
+              'text-zinc-400': !displayQuotaInfo!.page_is_over_limit && displayQuotaInfo!.page_remaining > 10
             }">
-              <template v-if="quotaInfo!.page_is_over_limit">
-                {{ quotaInfo!.page_over_limit }} pages over limit
+              <template v-if="displayQuotaInfo!.page_is_over_limit">
+                {{ displayQuotaInfo!.page_over_limit }} pages over limit
               </template>
               <template v-else>
-                {{ quotaInfo!.page_remaining }} pages remaining
+                {{ displayQuotaInfo!.page_remaining }} pages remaining
               </template>
             </span>
           </div>
 
-          <div v-if="!quotaInfo!.page_is_over_limit && quotaInfo!.page_remaining <= 5" class="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+          <div v-if="!displayQuotaInfo!.page_is_over_limit && displayQuotaInfo!.page_remaining <= 5" class="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
             <p class="text-sm text-orange-400 text-center">
               You're running low on storage. Consider upgrading your plan to upload more pages.
             </p>
@@ -148,46 +158,55 @@ async function refreshQuota() {
         <!-- Monthly File Upload Card -->
         <div class="p-8 bg-zinc-900 rounded-lg border border-zinc-800">
           <div class="flex items-center justify-between mb-4">
-            <span class="text-base font-medium text-zinc-200">
-              Monthly Uploads
-            </span>
+            <div class="flex items-center gap-2">
+              <span class="text-base font-medium text-zinc-200">
+                Monthly Uploads
+              </span>
+              <UButton
+                icon="i-heroicons-question-mark-circle"
+                variant="ghost"
+                size="xs"
+                :padded="false"
+                @click="showMonthlyLimits = true"
+              />
+            </div>
           </div>
 
           <div class="text-center mb-6">
             <div class="text-5xl font-bold mb-2" :class="{
-              'text-red-400': !quotaInfo!.monthly_can_upload || quotaInfo!.monthly_remaining <= 3,
-              'text-orange-400': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining <= 5 && quotaInfo!.monthly_remaining > 3,
-              'text-white': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining > 5
+              'text-red-400': !displayQuotaInfo!.monthly_can_upload || displayQuotaInfo!.monthly_remaining <= 3,
+              'text-orange-400': displayQuotaInfo!.monthly_can_upload && displayQuotaInfo!.monthly_remaining <= 5 && displayQuotaInfo!.monthly_remaining > 3,
+              'text-white': displayQuotaInfo!.monthly_can_upload && displayQuotaInfo!.monthly_remaining > 5
             }">
-              {{ quotaInfo!.monthly_file_count }}
+              {{ displayQuotaInfo!.monthly_file_count }}
             </div>
             <div class="text-base text-zinc-400">
-              of {{ quotaInfo!.max_monthly_files }} files
+              of {{ displayQuotaInfo!.max_monthly_files }} files
             </div>
           </div>
 
           <UProgress
-            :model-value="quotaInfo!.monthly_percentage_used"
-            :color="!quotaInfo!.monthly_can_upload || quotaInfo!.monthly_remaining <= 3 ? 'error' : quotaInfo!.monthly_remaining <= 5 ? 'warning' : 'primary'"
+            :model-value="displayQuotaInfo!.monthly_percentage_used"
+            :color="!displayQuotaInfo!.monthly_can_upload || displayQuotaInfo!.monthly_remaining <= 3 ? 'error' : displayQuotaInfo!.monthly_remaining <= 5 ? 'warning' : 'primary'"
             size="lg"
           />
 
           <div class="mt-6 text-center">
             <span class="text-base" :class="{
-              'text-red-400': !quotaInfo!.monthly_can_upload || quotaInfo!.monthly_remaining <= 3,
-              'text-orange-400': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining <= 5 && quotaInfo!.monthly_remaining > 3,
-              'text-zinc-400': quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining > 5
+              'text-red-400': !displayQuotaInfo!.monthly_can_upload || displayQuotaInfo!.monthly_remaining <= 3,
+              'text-orange-400': displayQuotaInfo!.monthly_can_upload && displayQuotaInfo!.monthly_remaining <= 5 && displayQuotaInfo!.monthly_remaining > 3,
+              'text-zinc-400': displayQuotaInfo!.monthly_can_upload && displayQuotaInfo!.monthly_remaining > 5
             }">
-              <template v-if="!quotaInfo!.monthly_can_upload">
+              <template v-if="!displayQuotaInfo!.monthly_can_upload">
                 Limit reached
               </template>
               <template v-else>
-                {{ quotaInfo!.monthly_remaining }} uploads remaining
+                {{ displayQuotaInfo!.monthly_remaining }} uploads remaining
               </template>
             </span>
           </div>
 
-          <div v-if="quotaInfo!.monthly_can_upload && quotaInfo!.monthly_remaining <= 5" class="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+          <div v-if="displayQuotaInfo!.monthly_can_upload && displayQuotaInfo!.monthly_remaining <= 5" class="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
             <p class="text-sm text-orange-400 text-center">
               You're approaching your monthly upload limit. Upgrade to upload more files per month.
             </p>
@@ -196,7 +215,7 @@ async function refreshQuota() {
       </div>
 
       <!-- Upgrade CTA -->
-      <div class="p-8 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/30">
+      <div class="p-8 bg-zinc-900 rounded-lg border border-zinc-800">
         <div class="text-center">
           <h3 class="text-lg font-semibold text-zinc-200 mb-3">Want higher limits?</h3>
           <p class="text-sm text-zinc-400 mb-6">
@@ -216,7 +235,7 @@ async function refreshQuota() {
       No quota information available
     </div>
 
-    <div v-if="loading && !quotaInfo" class="flex items-center justify-center py-12">
+    <div v-if="loading && !displayQuotaInfo" class="flex items-center justify-center py-12">
       <UIcon name="i-heroicons-arrow-path" class="animate-spin text-2xl text-zinc-400" />
     </div>
 
@@ -225,8 +244,8 @@ async function refreshQuota() {
       <template #body>
         <div class="space-y-4 text-zinc-300">
           <div class="border-l-2 border-primary-500 pl-4">
-            <p class="font-medium text-white mb-1">PDF Pages</p>
-            <p class="text-sm">1 page in a PDF = 1 page of storage</p>
+            <p class="font-medium text-white mb-1">Document Pages</p>
+            <p class="text-sm">1 page in a text document = 1 page of storage</p>
           </div>
 
           <div class="border-l-2 border-primary-500 pl-4">
@@ -238,6 +257,29 @@ async function refreshQuota() {
             <p class="font-medium text-white mb-1">Videos</p>
             <p class="text-sm">100 MB of video = 5 pages of storage</p>
             <p class="text-xs text-zinc-400 mt-1">(Minimum 1 page per video)</p>
+          </div>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Monthly Limits Modal -->
+    <UModal v-model:open="showMonthlyLimits" title="Monthly Limits">
+      <template #body>
+        <div class="space-y-4 text-zinc-300">
+          <div class="border-l-2 border-primary-500 pl-4">
+            <p class="font-medium text-white mb-1">Monthly Upload Limit</p>
+            <p class="text-sm">Maximum number of files you can upload per month. This limit resets on the 1st of each month.</p>
+          </div>
+
+          <div class="border-l-2 border-primary-500 pl-4">
+            <p class="font-medium text-white mb-1">Bandwidth Limit</p>
+            <p class="text-sm">Maximum total data you can upload per month. This also resets on the 1st of each month.</p>
+          </div>
+
+          <div class="bg-zinc-800/50 p-3 rounded border border-zinc-700">
+            <p class="text-xs text-zinc-400">
+              Once your monthly uploads or bandwidth limit is reached, you won't be able to upload new files until the limits reset. Upgrade your plan for higher monthly limits.
+            </p>
           </div>
         </div>
       </template>
