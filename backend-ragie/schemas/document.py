@@ -16,7 +16,7 @@ class DocumentResponse(BaseModel):
     """Document response model."""
 
     id: str
-    ragie_document_id: str
+    ragie_document_id: Optional[str] = None
     filename: str
     mime_type: Optional[str] = None
     file_size_bytes: Optional[int] = None
@@ -33,7 +33,7 @@ class DocumentStatusResponse(BaseModel):
     """Document status response."""
 
     id: str
-    ragie_document_id: str
+    ragie_document_id: Optional[str] = None
     filename: str
     status: str
     chunk_count: Optional[int] = None

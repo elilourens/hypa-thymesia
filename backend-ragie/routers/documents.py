@@ -7,7 +7,7 @@ from supabase import Client
 
 from core import get_current_user, AuthUser
 from core.deps import get_supabase, get_ragie_service
-from core.user_limits import check_user_can_upload, get_user_quota_status
+from core.user_limits import check_user_can_upload, get_user_quota_status, add_to_user_monthly_throughput
 from services.ragie_service import RagieService
 from schemas import DocumentResponse, DocumentListResponse, DocumentDeleteResponse, DocumentStatusResponse
 
@@ -24,13 +24,18 @@ async def upload_document(
     supabase: Client = Depends(get_supabase),
 ):
     """Upload a document to Ragie."""
-    # Check user quota
     try:
-        check_user_can_upload(supabase, current_user.id)
-    except HTTPException:
-        raise
+        # Get file size before upload
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
 
-    try:
+        # Check user quota with file size
+        try:
+            check_user_can_upload(supabase, current_user.id, file_size_bytes=file_size)
+        except HTTPException:
+            raise
+
         # Upload to Ragie
         ragie_response = await ragie_service.upload_document(
             file=file,
@@ -38,10 +43,6 @@ async def upload_document(
             group_id=group_id,
             metadata={"mime_type": file.content_type}
         )
-
-        # Get file size
-        file.file.seek(0, 2)
-        file_size = file.file.tell()
 
         # Create database record
         doc_record = supabase.table("ragie_documents").insert({
@@ -63,6 +64,9 @@ async def upload_document(
             raise HTTPException(status_code=500, detail="Failed to create document record")
 
         doc = doc_record.data[0]
+
+        # Track upload throughput
+        add_to_user_monthly_throughput(supabase, current_user.id, file_size)
 
         # Fetch group name if document has a group
         group_name = None
@@ -248,11 +252,12 @@ async def delete_document(
         doc = response.data
 
         # Delete from Ragie
-        try:
-            await ragie_service.delete_document(doc["ragie_document_id"])
-        except Exception as e:
-            logger.warning(f"Failed to delete from Ragie: {e}")
-            # Continue with database deletion anyway
+        if doc.get("ragie_document_id"):
+            try:
+                await ragie_service.delete_document(doc["ragie_document_id"])
+            except Exception as e:
+                logger.warning(f"Failed to delete from Ragie: {e}")
+                # Continue with database deletion anyway
 
         # Delete from database
         supabase.table("ragie_documents").delete().eq("id", doc_id).execute()
@@ -290,14 +295,15 @@ async def update_document(
         doc = response.data
 
         # Update metadata in Ragie
-        try:
-            await ragie_service.update_metadata(
-                doc["ragie_document_id"],
-                {"group_id": group_id}
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update Ragie metadata: {e}")
-            # Continue with database update even if Ragie sync fails
+        if doc.get("ragie_document_id"):
+            try:
+                await ragie_service.update_metadata(
+                    doc["ragie_document_id"],
+                    {"group_id": group_id}
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update Ragie metadata: {e}")
+                # Continue with database update even if Ragie sync fails
 
         # Update document group in database
         ragie_metadata = doc.get("ragie_metadata", {}) or {}
@@ -360,26 +366,27 @@ async def get_document_status(
         doc = response.data
 
         # Get latest status from Ragie
-        try:
-            ragie_doc = await ragie_service.get_document_status(doc["ragie_document_id"])
+        if doc.get("ragie_document_id"):
+            try:
+                ragie_doc = await ragie_service.get_document_status(doc["ragie_document_id"])
 
-            # Update database if status changed
-            if ragie_doc.status != doc["status"]:
-                update_data = {
-                    "status": ragie_doc.status,
-                }
-                if hasattr(ragie_doc, "chunk_count") and ragie_doc.chunk_count:
-                    update_data["chunk_count"] = int(ragie_doc.chunk_count)
-                if hasattr(ragie_doc, "page_count") and ragie_doc.page_count:
-                    update_data["page_count"] = int(ragie_doc.page_count)
+                # Update database if status changed
+                if ragie_doc.status != doc["status"]:
+                    update_data = {
+                        "status": ragie_doc.status,
+                    }
+                    if hasattr(ragie_doc, "chunk_count") and ragie_doc.chunk_count:
+                        update_data["chunk_count"] = int(ragie_doc.chunk_count)
+                    if hasattr(ragie_doc, "page_count") and ragie_doc.page_count:
+                        update_data["page_count"] = int(ragie_doc.page_count)
 
-                supabase.table("ragie_documents").update(update_data).eq("id", doc_id).execute()
+                    supabase.table("ragie_documents").update(update_data).eq("id", doc_id).execute()
 
-                # Update local doc object with changes instead of fetching again
-                doc.update(update_data)
+                    # Update local doc object with changes instead of fetching again
+                    doc.update(update_data)
 
-        except Exception as e:
-            logger.warning(f"Failed to get status from Ragie: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to get status from Ragie: {e}")
 
         return DocumentStatusResponse(
             id=doc["id"],
