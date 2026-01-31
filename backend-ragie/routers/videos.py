@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, 
 from supabase import Client
 
 from core import get_current_user, AuthUser
-from core.deps import get_supabase, get_ragie_service
+from core.deps import get_supabase, get_supabase_admin, get_ragie_service
 from core.user_limits import check_user_can_upload, add_to_user_monthly_throughput, add_to_user_monthly_file_count
 from services.video_service import VideoService
 from services.ragie_service import RagieService
@@ -46,8 +46,8 @@ def _process_video_background(
         logger.error(f"Background task failed for video {video_id}: {e}")
 
 
-def get_video_service(supabase: Client = Depends(get_supabase), ragie_service: RagieService = Depends(get_ragie_service)) -> VideoService:
-    """Dependency to get video service."""
+def get_video_service(current_user: AuthUser = Depends(get_current_user), supabase: Client = Depends(get_supabase_admin), ragie_service: RagieService = Depends(get_ragie_service)) -> VideoService:
+    """Dependency to get video service (uses admin client to bypass RLS for write operations)."""
     return VideoService(supabase, ragie_service)
 
 
@@ -116,7 +116,7 @@ async def upload_video(
         raise
     except Exception as e:
         logger.error(f"Error uploading video: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to upload video")
 
 
 @router.get("/list", response_model=VideoListResponse)
@@ -199,7 +199,7 @@ async def list_videos(
 
     except Exception as e:
         logger.error(f"Error listing videos: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list videos")
 
 
 @router.get("/{video_id}", response_model=VideoResponse)
@@ -250,7 +250,7 @@ async def get_video(
         raise
     except Exception as e:
         logger.error(f"Error getting video: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve video")
 
 
 @router.get("/{video_id}/chunks", response_model=list)
@@ -292,7 +292,7 @@ async def get_video_chunks(
         raise
     except Exception as e:
         logger.error(f"Error getting video chunks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve video chunks")
 
 
 @router.get("/{video_id}/signed-url", response_model=VideoSignedUrlResponse)
@@ -315,11 +315,13 @@ async def get_video_signed_url(
             expires_in=expires_in
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=404, detail="Video not found")
         logger.error(f"Error getting signed URL: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get signed URL")
 
 
 @router.delete("/{video_id}", response_model=VideoDeleteResponse)
@@ -337,8 +339,10 @@ async def delete_video(
             video_id=video_id
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=404, detail="Video not found")
         logger.error(f"Error deleting video: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete video")

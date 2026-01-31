@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from supabase import Client
 
 from core import get_current_user, AuthUser
-from core.deps import get_supabase, get_ragie_service
+from core.deps import get_supabase, get_supabase_admin, get_ragie_service
+from core.rate_limiting import rate_limit
 from core.user_limits import check_user_can_upload, get_user_quota_status, add_to_user_monthly_throughput, add_to_user_monthly_file_count
 from services.ragie_service import RagieService
 from services.video_service import VideoService
@@ -16,12 +17,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-def get_video_service(supabase: Client = Depends(get_supabase), ragie_service: RagieService = Depends(get_ragie_service)) -> VideoService:
-    """Dependency to get video service."""
+def get_video_service(current_user: AuthUser = Depends(get_current_user), supabase: Client = Depends(get_supabase_admin), ragie_service: RagieService = Depends(get_ragie_service)) -> VideoService:
+    """Dependency to get video service (uses admin client to bypass RLS for write operations)."""
     return VideoService(supabase, ragie_service)
 
 
 @router.post("/upload", response_model=DocumentResponse)
+@rate_limit(calls_per_minute=10)
 async def upload_document(
     file: UploadFile = File(...),
     group_id: Optional[str] = Query(None),
@@ -101,10 +103,11 @@ async def upload_document(
         raise
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to upload document")
 
 
 @router.get("/list", response_model=DocumentListResponse)
+@rate_limit(calls_per_minute=10)
 async def list_documents(
     group_id: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
@@ -213,7 +216,7 @@ async def list_documents(
 
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list documents")
 
 
 @router.get("/{doc_id}", response_model=DocumentResponse)
@@ -261,7 +264,7 @@ async def get_document(
         raise
     except Exception as e:
         logger.error(f"Error getting document: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve document")
 
 
 @router.delete("/{doc_id}", response_model=DocumentDeleteResponse)
@@ -310,7 +313,7 @@ async def delete_document(
         raise
     except Exception as e:
         logger.error(f"Error deleting document: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete document")
 
 
 @router.patch("/{doc_id}", response_model=DocumentResponse)
@@ -382,7 +385,7 @@ async def update_document(
         raise
     except Exception as e:
         logger.error(f"Error updating document: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update document")
 
 
 @router.get("/{doc_id}/status", response_model=DocumentStatusResponse)
@@ -441,4 +444,4 @@ async def get_document_status(
         raise
     except Exception as e:
         logger.error(f"Error getting document status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get document status")

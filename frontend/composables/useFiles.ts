@@ -156,5 +156,32 @@ export function useFilesApi() {
     }
   }
 
-  return { listFiles, getSignedUrl, getThumbnailUrl, getVideoInfo }
+  /**
+   * Fetch a Ragie image file and return as blob URL.
+   * This allows the frontend to display images in img tags without relying on auth headers.
+   * @param docId - The Ragie document ID
+   * @returns A blob URL that can be used in img src
+   */
+  async function getRagieImageUrl(docId: string): Promise<string> {
+    const headers = await authHeaders()
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/storage/file/ragie/${docId}`,
+        { method: 'GET', headers }
+      )
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.status}`)
+      }
+
+      const blob = await response.blob()
+      return URL.createObjectURL(blob)
+    } catch (err: any) {
+      console.error('Error fetching Ragie image:', err)
+      throw new Error(err?.message || 'Failed to fetch Ragie image')
+    }
+  }
+
+  return { listFiles, getSignedUrl, getThumbnailUrl, getVideoInfo, getRagieImageUrl }
 }

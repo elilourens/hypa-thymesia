@@ -6,6 +6,7 @@ from supabase import Client
 
 from core import get_current_user, AuthUser
 from core.deps import get_ragie_service, get_supabase
+from core.rate_limiting import rate_limit
 from services.ragie_service import RagieService
 from schemas import SearchRequest, SearchResponse, ScoredChunk
 
@@ -35,7 +36,6 @@ def _enrich_chunk_metadata(chunk, supabase: Client) -> dict:
     if doc_id:
         # Check if this is a video document stored in Supabase
         is_video = metadata.get("chunk_content_type") == "video"
-        logger.info(f"Chunk {doc_id}: chunk_content_type={metadata.get('chunk_content_type')}, is_video={is_video}")
 
         if is_video:
             # Video chunks: get storage path and thumbnail from Supabase
@@ -47,12 +47,14 @@ def _enrich_chunk_metadata(chunk, supabase: Client) -> dict:
 
                 if video_response.data:
                     metadata["bucket"] = video_response.data.get("storage_bucket", "videos")
-                    metadata["storage_path"] = video_response.data["storage_path"]
+                    storage_path = video_response.data.get("storage_path")
+                    if storage_path:
+                        metadata["storage_path"] = storage_path
 
                     # Thumbnail is stored in videos bucket under thumbnails/{ragie_documents.id}.jpg
                     supabase_doc_id = video_response.data.get("id")
-                    metadata["thumbnail_url"] = f"thumbnails/{supabase_doc_id}.jpg"
-                    logger.info(f"Set thumbnail_url for document {doc_id}: {metadata['thumbnail_url']}")
+                    if supabase_doc_id:
+                        metadata["thumbnail_url"] = f"thumbnails/{supabase_doc_id}.jpg"
                 else:
                     # Fallback to Ragie if not found in Supabase
                     metadata["bucket"] = "ragie"
@@ -95,6 +97,7 @@ def _enrich_chunk_metadata(chunk, supabase: Client) -> dict:
 
 
 @router.post("/retrieve", response_model=SearchResponse)
+@rate_limit(calls_per_minute=10)
 async def retrieve(
     request: SearchRequest,
     current_user: AuthUser = Depends(get_current_user),
@@ -139,4 +142,4 @@ async def retrieve(
 
     except Exception as e:
         logger.error(f"Error retrieving documents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve documents")

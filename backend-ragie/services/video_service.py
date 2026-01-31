@@ -3,10 +3,12 @@
 import logging
 import tempfile
 import os
+import asyncio
 from typing import Optional
 from fastapi import UploadFile
 from supabase import Client
 from .ragie_service import RagieService
+from core.config import settings
 import cv2
 import numpy as np
 from io import BytesIO
@@ -189,12 +191,14 @@ class VideoService:
         """
         Process video with Ragie.ai.
 
-        1. Read video from temp file (or download from Supabase if not cached)
-        2. Send to Ragie for processing
-        3. Wait for Ragie to complete
-        4. Retrieve chunks from Ragie
-        5. Store chunks in video_chunks table
-        6. Update ragie_documents status
+        If RAGIE_WEBHOOK_SECRET is configured (production):
+        - Submits video to Ragie and returns immediately with status "partitioning"
+        - Ragie calls webhook endpoint when processing completes
+        - Webhook updates status to "ready" and stores chunks
+
+        If RAGIE_WEBHOOK_SECRET is not configured (local development):
+        - Submits video to Ragie and polls for completion
+        - Returns when status becomes "ready" (max 60 attempts, 30 min timeout)
 
         Args:
             video_id: Document ID (from ragie_documents) to process
@@ -203,7 +207,7 @@ class VideoService:
             thumbnail_path: Storage path of extracted first frame thumbnail
 
         Returns:
-            Processing result
+            Processing result dict with status and ragie_document_id
         """
         try:
             # Get ragie_documents record
@@ -261,90 +265,32 @@ class VideoService:
                 metadata={"original_storage_path": doc["storage_path"]}
             )
 
-            # Wait for Ragie processing (polling)
-            import asyncio
-            max_attempts = 10  # 10 attempts × 30 seconds = 5 minutes total timeout (for testing)
-            attempt = 0
-            while attempt < max_attempts:
-                status_response = await self.ragie_service.get_document_status(
-                    ragie_doc.id
-                )
-
-                current_status = getattr(status_response, 'status', None)
-                logger.info(f"Ragie polling attempt {attempt + 1}/{max_attempts}, status: {current_status}, response type: {type(status_response)}, full response: {status_response}")
-
-                # Check for completion - Ragie uses "ready" for completion
-                if current_status in ("completed", "succeeded", "done", "ready"):
-                    logger.info(f"Ragie processing completed for document {ragie_doc.id}")
-                    break
-
-                if current_status in ("failed", "error"):
-                    raise Exception(f"Ragie processing failed: {status_response}")
-
-                await asyncio.sleep(30)  # Poll every 30 seconds (2 requests per minute)
-                attempt += 1
-
-            if attempt >= max_attempts:
-                raise Exception(f"Ragie processing timeout after {max_attempts} attempts. Last status: {current_status}")
-
-            # Get chunks from Ragie
-            chunks_response = await self.ragie_service.retrieve(
-                query="",  # Get all chunks
-                user_id=user_id,
-                top_k=1000,  # Get all chunks
-                rerank=False
-            )
-
-            # Filter chunks for this document
-            video_chunks = [
-                chunk for chunk in chunks_response.scored_chunks
-                if chunk.document_id == ragie_doc.id
-            ]
-
-            # Store chunks in database
-            chunk_records = []
-            for i, chunk in enumerate(video_chunks):
-                # Extract timing info from chunk metadata
-                start_time = chunk.metadata.get("start_time", 0) if hasattr(chunk, "metadata") else 0
-                end_time = chunk.metadata.get("end_time", 0) if hasattr(chunk, "metadata") else 0
-
-                chunk_record = {
-                    "user_id": user_id,
-                    "ragie_chunk_id": chunk.chunk_id,
-                    "ragie_document_id": str(ragie_doc.id),
-                    "chunk_index": i,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "audio_transcript": chunk.text if hasattr(chunk, "text") else "",
-                    "video_description": chunk.metadata.get("video_description", "") if hasattr(chunk, "metadata") else "",
-                    "thumbnail_url": thumbnail_path if i == 0 else None  # Store thumbnail path on first chunk only
-                }
-                chunk_records.append(chunk_record)
-
-            if chunk_records:
-                self.supabase.table("video_chunks").insert(chunk_records).execute()
+            # Store Ragie document ID in database
+            # Status is already "partitioning" from earlier update
+            self.supabase.table("ragie_documents").update({
+                "ragie_document_id": str(ragie_doc.id)
+            }).eq("id", video_id).execute()
 
             # Calculate page_count from file size (100MB = 5 pages)
-            # Formula: pages = (file_size_bytes / 100MB) * 5 = file_size_bytes / 20MB
             file_size_mb = doc["file_size_bytes"] / (1024 * 1024)
-            page_count = max(1, round(file_size_mb / 20 * 5, 1))  # Minimum 1 page, round to 1 decimal
-
-            # Update ragie_documents record
+            page_count = max(1, round(file_size_mb / 20 * 5, 1))
             self.supabase.table("ragie_documents").update({
-                "status": "ready",
-                "ragie_document_id": str(ragie_doc.id),
-                "chunk_count": len(chunk_records),
                 "page_count": page_count
             }).eq("id", video_id).execute()
 
-            logger.info(f"Document {video_id} processed successfully with {len(chunk_records)} chunks")
-
-            return {
-                "document_id": video_id,
-                "ragie_document_id": str(ragie_doc.id),
-                "chunk_count": len(chunk_records),
-                "status": "ready"
-            }
+            # Check if webhook is configured
+            if settings.ragie_webhook_secret:
+                # Production: Webhook will handle processing updates
+                logger.info(f"Video {video_id} submitted to Ragie (doc_id: {ragie_doc.id}). Webhook will handle processing updates.")
+                return {
+                    "document_id": video_id,
+                    "ragie_document_id": str(ragie_doc.id),
+                    "status": "partitioning"
+                }
+            else:
+                # Local development: Poll for completion
+                logger.info(f"Video {video_id} submitted to Ragie. Polling for completion (no webhook configured)...")
+                return await self._poll_document_status(video_id, user_id, str(ragie_doc.id))
 
         except Exception as e:
             logger.error(f"Error processing video with Ragie: {e}")
@@ -365,6 +311,87 @@ class VideoService:
                     logger.info(f"Cleaned up temp file: {temp_file_path}")
                 except Exception as e:
                     logger.warning(f"Failed to clean up temp file {temp_file_path}: {e}")
+
+    async def _poll_document_status(
+        self,
+        video_id: str,
+        user_id: str,
+        ragie_document_id: str,
+        max_attempts: int = 60,
+        poll_interval: int = 30
+    ) -> dict:
+        """
+        Poll Ragie for document processing completion (local development fallback).
+
+        Args:
+            video_id: Local document ID
+            user_id: User ID (for RLS)
+            ragie_document_id: Ragie document ID
+            max_attempts: Maximum polling attempts (60 * 30s = 30 minutes max)
+            poll_interval: Seconds between polls
+
+        Returns:
+            Processing result dict with status and document info
+        """
+        attempt = 0
+        while attempt < max_attempts:
+            attempt += 1
+            try:
+                # Poll Ragie for status
+                ragie_doc = await self.ragie_service.get_document_status(ragie_document_id)
+
+                if ragie_doc.status in ("ready", "indexed", "keyword_indexed"):
+                    logger.info(f"Video {video_id} processing completed with status: {ragie_doc.status}")
+
+                    # Update document in database
+                    update_data = {"status": ragie_doc.status}
+                    if hasattr(ragie_doc, "chunk_count") and ragie_doc.chunk_count:
+                        update_data["chunk_count"] = int(ragie_doc.chunk_count)
+                    if hasattr(ragie_doc, "page_count") and ragie_doc.page_count:
+                        update_data["page_count"] = int(ragie_doc.page_count)
+
+                    self.supabase.table("ragie_documents").update(update_data).eq(
+                        "id", video_id
+                    ).execute()
+
+                    return {
+                        "document_id": video_id,
+                        "ragie_document_id": ragie_document_id,
+                        "status": ragie_doc.status
+                    }
+
+                elif ragie_doc.status == "failed":
+                    error_msg = getattr(ragie_doc, "error", "Processing failed")
+                    logger.error(f"Video {video_id} processing failed: {error_msg}")
+
+                    self.supabase.table("ragie_documents").update({
+                        "status": "failed",
+                        "processing_error": error_msg
+                    }).eq("id", video_id).execute()
+
+                    raise Exception(f"Ragie processing failed: {error_msg}")
+
+                else:
+                    # Still processing
+                    logger.info(f"Video {video_id} still processing (attempt {attempt}/{max_attempts}): {ragie_doc.status}")
+
+            except Exception as e:
+                if "failed" in str(e).lower():
+                    raise
+                logger.warning(f"Poll attempt {attempt} failed: {e}")
+
+            # Wait before next poll (except on last attempt)
+            if attempt < max_attempts:
+                await asyncio.sleep(poll_interval)
+
+        # Timeout reached
+        logger.error(f"Video {video_id} polling timeout after {max_attempts} attempts ({max_attempts * poll_interval}s)")
+        self.supabase.table("ragie_documents").update({
+            "status": "failed",
+            "processing_error": f"Processing timeout after {max_attempts * poll_interval} seconds"
+        }).eq("id", video_id).execute()
+
+        raise Exception(f"Document processing timeout (max {max_attempts * poll_interval} seconds)")
 
     def get_signed_thumbnail_url(
         self,

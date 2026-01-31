@@ -15,6 +15,7 @@ from routers import (
     audit_router,
     storage_router,
     videos_router,
+    ragie_webhooks_router,
 )
 
 # Configure logging
@@ -29,12 +30,13 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+cors_origins = [origin.strip() for origin in settings.cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Include routers
@@ -47,6 +49,7 @@ app.include_router(user_settings_router, prefix=settings.api_prefix)
 app.include_router(audit_router, prefix=settings.api_prefix)
 app.include_router(storage_router, prefix=settings.api_prefix)
 app.include_router(videos_router, prefix=settings.api_prefix)
+app.include_router(ragie_webhooks_router, prefix=settings.api_prefix)
 
 
 @app.on_event("startup")
@@ -55,6 +58,7 @@ async def startup_event():
     logger.info(" Ragie Backend API starting...")
     logger.info(f"API Prefix: {settings.api_prefix}")
     logger.info(f"Debug Mode: {settings.debug}")
+    logger.info(f"CORS Origins: {settings.cors_origins}")
 
     # Security: Validate Stripe webhook secret is configured
     if not settings.stripe_webhook_secret:
@@ -66,6 +70,14 @@ async def startup_event():
         raise RuntimeError(
             "STRIPE_WEBHOOK_SECRET is not configured. "
             "Webhook endpoint requires valid signature verification."
+        )
+
+    # Ragie webhook is optional for local development (polling is used as fallback)
+    if not settings.ragie_webhook_secret:
+        logger.warning(
+            "RAGIE_WEBHOOK_SECRET is not configured. "
+            "Running in local mode with polling fallback for document processing. "
+            "For production, set RAGIE_WEBHOOK_SECRET environment variable."
         )
 
 

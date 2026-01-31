@@ -35,7 +35,7 @@ async def list_groups(
 
     except Exception as e:
         logger.error(f"Error listing groups: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list groups")
 
 
 @router.post("", response_model=GroupResponse)
@@ -67,7 +67,7 @@ async def create_group(
         raise
     except Exception as e:
         logger.error(f"Error creating group: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create group")
 
 
 @router.patch("/{group_id}", response_model=GroupResponse)
@@ -111,7 +111,7 @@ async def rename_group(
         raise
     except Exception as e:
         logger.error(f"Error updating group: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update group")
 
 
 @router.delete("/{group_id}")
@@ -139,4 +139,4 @@ async def delete_group(
         raise
     except Exception as e:
         logger.error(f"Error deleting group: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete group")

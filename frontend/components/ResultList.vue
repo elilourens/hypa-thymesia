@@ -2,7 +2,7 @@
 import { watch, ref, nextTick } from 'vue'
 import { marked } from 'marked'
 import { useFilesApi } from '~/composables/useFiles'
-const { getSignedUrl, getThumbnailUrl } = useFilesApi()
+const { getSignedUrl, getThumbnailUrl, getRagieImageUrl } = useFilesApi()
 const toast = useToast()
 
 const props = defineProps<{ results: any[], deleting?: boolean }>()
@@ -385,7 +385,7 @@ watch(
         })
       }
 
-      // For images, fetch thumbnail URL
+      // For images, fetch the image
       if (modality === 'image' && !r.metadata?.signed_url) {
         const cacheKey = `${r.metadata.bucket}:${r.metadata.storage_path}`
 
@@ -400,16 +400,25 @@ watch(
 
         try {
           pendingFetches.value.add(cacheKey)
-          const url = await getThumbnailUrl(
-            r.metadata.bucket,
-            r.metadata.storage_path
-          )
+          let url: string
+
+          // For Ragie images, fetch directly with auth and convert to blob URL
+          if (r.metadata.bucket === 'ragie') {
+            url = await getRagieImageUrl(r.metadata.storage_path)
+          } else {
+            // For other images (Supabase), use signed URL
+            url = await getThumbnailUrl(
+              r.metadata.bucket,
+              r.metadata.storage_path
+            )
+          }
+
           if (url) {
             r.metadata.signed_url = url
             urlCache.value.set(cacheKey, url)
           }
         } catch (err) {
-          console.error('Failed to get thumbnail URL for', r.metadata.storage_path, err)
+          console.error('Failed to get image URL for', r.metadata.storage_path, err)
         } finally {
           pendingFetches.value.delete(cacheKey)
         }

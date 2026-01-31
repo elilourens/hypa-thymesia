@@ -2,12 +2,13 @@
 
 import logging
 import httpx
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from supabase import Client
 
 from core import get_current_user, AuthUser
-from core.deps import get_supabase, get_ragie_service
+from core.deps import get_supabase, get_supabase_admin, get_ragie_service
 from core.config import settings
 from services.ragie_service import RagieService
 
@@ -22,7 +23,7 @@ async def get_signed_url(
     path: str = Query(...),
     download: bool = Query(False),
     current_user: AuthUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase),
+    supabase: Client = Depends(get_supabase_admin),
     ragie_service: RagieService = Depends(get_ragie_service),
 ):
     """
@@ -90,40 +91,49 @@ async def get_signed_url(
             raise
         except Exception as e:
             logger.error(f"Error generating signed URL for {bucket}/{path}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Failed to generate signed URL")
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error in get_signed_url: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to generate signed URL")
 
 
 @router.get("/file/ragie/{doc_id}")
 async def get_ragie_file(
     doc_id: str,
+    current_user: AuthUser = Depends(get_current_user),
     ragie_service: RagieService = Depends(get_ragie_service),
+    supabase: Client = Depends(get_supabase_admin),
 ):
     """
     Stream a document's source file from Ragie.
 
     Uses Ragie's document source API to retrieve the original uploaded file.
-
-    Note: This endpoint doesn't require authentication because the user must be
-    authenticated to obtain the signed URL from /signed-url first.
+    Requires authentication and document ownership.
 
     Args:
         doc_id: Ragie document ID
+        current_user: Current authenticated user
         ragie_service: Ragie service
+        supabase: Supabase client
 
     Returns:
         Streamed file content from Ragie
     """
     try:
-        # Verify document exists in Ragie
-        logger.info(f"Fetching document status for {doc_id}")
-        doc = await ragie_service.get_document_status(doc_id)
-        logger.info(f"Document {doc_id} status check passed, fetching source")
+        # Verify document exists and belongs to the current user
+        db_doc = supabase.table("ragie_documents").select("*").eq("ragie_document_id", doc_id).execute()
+
+        if not db_doc.data or len(db_doc.data) == 0:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        document = db_doc.data[0]
+
+        # Verify ownership
+        if document["user_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
 
         # Call Ragie's document source API
         ragie_api_url = f"https://api.ragie.ai/documents/{doc_id}/source"
@@ -137,13 +147,15 @@ async def get_ragie_file(
                 response.raise_for_status()
 
                 # Stream the file back to the client
+                # Escape filename to prevent header injection
+                safe_filename = quote(f"document_{doc_id}", safe='')
                 return StreamingResponse(
                     iter([response.content]),
                     media_type=response.headers.get("content-type", "application/octet-stream"),
                     headers={
                         "Content-Disposition": response.headers.get(
                             "content-disposition",
-                            f"inline; filename=document_{doc_id}"
+                            f"inline; filename={safe_filename}"
                         )
                     }
                 )
@@ -165,7 +177,7 @@ async def get_ragie_file(
 async def get_video_info(
     doc_id: str,
     current_user: AuthUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase),
+    supabase: Client = Depends(get_supabase_admin),
 ):
     """
     Get video file information by document ID.
@@ -205,4 +217,4 @@ async def get_video_info(
         raise
     except Exception as e:
         logger.error(f"Error getting video info for {doc_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get video information")

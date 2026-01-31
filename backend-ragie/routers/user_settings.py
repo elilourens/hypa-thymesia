@@ -47,7 +47,7 @@ async def get_user_settings(
         raise
     except Exception as e:
         logger.error(f"Error getting user settings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get user settings")
 
 
 @router.get("/quota-status")
@@ -62,4 +62,4 @@ async def get_quota_status(
 
     except Exception as e:
         logger.error(f"Error getting quota status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to get quota status")

@@ -91,7 +91,7 @@ async def check_orphaned_documents(
 
     except Exception as e:
         logger.error(f"Error auditing documents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to audit documents")
 
 
 @router.delete("/cleanup-orphaned")
@@ -144,4 +144,4 @@ async def cleanup_orphaned_documents(
 
     except Exception as e:
         logger.error(f"Error cleaning up orphaned documents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to cleanup orphaned documents")

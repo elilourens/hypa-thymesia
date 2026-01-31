@@ -12,15 +12,32 @@ from services.supabase_service import SupabaseService
 
 @lru_cache(maxsize=1)
 def _get_supabase_admin() -> Client:
-    """Get admin Supabase client (cached) - bypasses RLS for admin operations."""
+    """Get admin Supabase client (cached) - bypasses RLS for admin operations only."""
     return create_client(settings.supabase_url, settings.supabase_key)
 
 
+@lru_cache(maxsize=1)
+def _get_supabase_anon() -> Client:
+    """Get anon Supabase client (cached) - respects RLS policies."""
+    return create_client(settings.supabase_url, settings.supabase_anon_key)
+
+
 def get_supabase(current_user: AuthUser = Depends(get_current_user)) -> Client:
-    """Get Supabase client - uses admin key which bypasses RLS."""
-    # For now, return admin client that bypasses RLS
-    # This allows storage uploads to work without RLS restrictions
-    # The user_id is still enforced at the application level via current_user.id
+    """Get Supabase client respecting RLS policies.
+
+    Uses the anon key which enforces Row-Level Security policies.
+    All queries must include proper user_id filtering, which will be
+    enforced at the database level through RLS policies.
+    """
+    return _get_supabase_anon()
+
+
+def get_supabase_admin(current_user: AuthUser = Depends(get_current_user)) -> Client:
+    """Get admin Supabase client (bypasses RLS).
+
+    Use this for endpoints that implement custom authorization checks.
+    Requires authentication but bypasses Row-Level Security policies.
+    """
     return _get_supabase_admin()
 
 

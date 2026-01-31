@@ -1,5 +1,6 @@
 """Environment configuration for the Ragie backend."""
 
+from typing import Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
 
     # Ragie Configuration
     ragie_api_key: str
+    ragie_webhook_secret: Optional[str] = None  # Optional: Ragie webhook secret (if not set, polling is used locally)
 
     # Stripe Configuration
     stripe_secret_key: str
@@ -26,13 +28,19 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_secret_key: str
 
+    # CORS Configuration
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    # Rate Limiting Configuration (optional - uses in-memory if not set)
+    rate_limit_redis_url: Optional[str] = None
+
     # App Configuration
     api_prefix: str = "/api/v1"
     debug: bool = False
 
     @field_validator("stripe_webhook_secret")
     @classmethod
-    def validate_webhook_secret(cls, v: str) -> str:
+    def validate_stripe_webhook_secret(cls, v: str) -> str:
         """Validate that Stripe webhook secret is not empty or whitespace-only.
 
         SECURITY: This is critical for webhook signature verification.
@@ -44,6 +52,18 @@ class Settings(BaseSettings):
                 "Webhook signature verification requires this secret."
             )
         return v.strip()
+
+    @field_validator("ragie_webhook_secret", mode="before")
+    @classmethod
+    def validate_ragie_webhook_secret(cls, v: Optional[str]) -> Optional[str]:
+        """Validate that Ragie webhook secret is not empty if provided.
+
+        For local development without webhooks, this can be None.
+        For production with webhooks, this must be set.
+        """
+        if v and not v.strip():
+            raise ValueError("RAGIE_WEBHOOK_SECRET must be non-empty if provided.")
+        return v.strip() if v else None
 
     class Config:
         env_file = ".env"

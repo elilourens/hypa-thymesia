@@ -96,7 +96,8 @@ async def create_checkout_session(
     try:
         price_id = get_price_id_from_tier(request.tier)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Failed to get price ID: {e}")
+        raise HTTPException(status_code=400, detail="Invalid or unconfigured payment plan")
 
     if not price_id:
         raise HTTPException(

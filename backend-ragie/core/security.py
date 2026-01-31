@@ -1,11 +1,14 @@
 """JWT authentication and security utilities."""
 
+import logging
 from typing import Optional
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 from jwt import PyJWKClient
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
 
@@ -34,6 +37,8 @@ def _get_jwks():
 
 def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)) -> AuthUser:
     """Validate JWT token and return authenticated user."""
+    if auth is None:
+        raise HTTPException(status_code=403, detail="No authorization header")
     token = auth.credentials
     try:
         key = _get_jwks().get_signing_key_from_jwt(token).key
@@ -45,7 +50,8 @@ def get_current_user(auth: HTTPAuthorizationCredentials = Depends(security)) -> 
             options={"require": ["sub", "exp", "iat"]},
         )
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid or expired token: {e}")
+        logger.warning(f"Token validation failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     return AuthUser(
         sub=payload["sub"],
