@@ -5,8 +5,17 @@ interface SubscriptionStatus {
   is_subscribed: boolean
   subscription_id?: string
   status?: string
+  tier?: 'free' | 'pro' | 'max'
   current_period_end?: number
   cancel_at_period_end?: boolean
+}
+
+interface TierInfo {
+  name: string
+  price: number
+  pages: number
+  monthlyFiles: number
+  bandwidth: string
 }
 
 export const useStripe = () => {
@@ -50,7 +59,10 @@ export const useStripe = () => {
   /**
    * Create a Stripe checkout session and redirect to payment page
    */
-  const createCheckoutSession = async (supabaseAccessToken: string): Promise<void> => {
+  const createCheckoutSession = async (
+    supabaseAccessToken: string,
+    tier: 'pro' | 'max' = 'pro'
+  ): Promise<void> => {
     try {
       loading.value = true
       error.value = null
@@ -63,8 +75,9 @@ export const useStripe = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          success_url: `${window.location.origin}/dashboard/upload?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${window.location.origin}/dashboard/upload?canceled=true`
+          tier,
+          success_url: `${window.location.origin}/account?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${window.location.origin}/pricing?canceled=true`
         })
       })
 
@@ -115,12 +128,43 @@ export const useStripe = () => {
     }
   }
 
+  /**
+   * Get tier information including pricing and limits
+   */
+  const getTierInfo = (tier: 'free' | 'pro' | 'max'): TierInfo => {
+    const tiers: Record<'free' | 'pro' | 'max', TierInfo> = {
+      free: {
+        name: 'Free',
+        price: 0,
+        pages: 200,
+        monthlyFiles: 50,
+        bandwidth: '5 GB'
+      },
+      pro: {
+        name: 'Pro',
+        price: 15,
+        pages: 2000,
+        monthlyFiles: 500,
+        bandwidth: '20 GB'
+      },
+      max: {
+        name: 'Max',
+        price: 90,
+        pages: 10000,
+        monthlyFiles: 2000,
+        bandwidth: '100 GB'
+      }
+    }
+    return tiers[tier]
+  }
+
   return {
     loading,
     error,
     subscriptionStatus,
     getSubscriptionStatus,
     createCheckoutSession,
-    cancelSubscription
+    cancelSubscription,
+    getTierInfo
   }
 }

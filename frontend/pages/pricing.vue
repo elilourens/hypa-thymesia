@@ -1,0 +1,335 @@
+<template>
+  <div class="py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-7xl mx-auto">
+      <!-- Header -->
+      <div class="text-center mb-16">
+        <h1 class="text-4xl font-bold mb-4">Simple, Transparent Pricing</h1>
+        <p class="text-xl ">Choose the plan that works best for you</p>
+      </div>
+
+      <!-- Pricing Cards Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-6xl mx-auto mb-12">
+        <!-- Free Tier Card -->
+        <UCard
+          variant="subtle"
+          class="rounded-xl overflow-hidden"
+        >
+          <!-- Card Header -->
+          <template #header>
+            <div class="p-6">
+              <h3 class="text-2xl font-bold ">Free</h3>
+              <p class="text-sm  mt-1">Get started for free</p>
+            </div>
+          </template>
+
+          <!-- Card Body -->
+          <div class="p-6">
+            <!-- Price -->
+            <div class="mb-6">
+              <div class="text-5xl font-bold text-primary">£0</div>
+              <div class="text-sm  mt-2">/month</div>
+            </div>
+
+            <!-- Divider -->
+            <div class="border-t my-6"></div>
+
+            <!-- Features -->
+            <div class="space-y-4">
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">200 total pages</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">50 monthly file uploads</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">5 GB monthly bandwidth</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">Basic document search</span>
+              </div>
+            </div>
+          </div>
+        </UCard>
+
+        <!-- Pro Tier Card -->
+        <UCard
+          variant="subtle"
+          class="rounded-xl overflow-hidden ring-2 ring-primary/20"
+        >
+          <!-- Card Header -->
+          <template #header>
+            <div class="p-6">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-2xl font-bold text-primary">Pro</h3>
+                <UBadge color="primary" variant="subtle">Popular</UBadge>
+              </div>
+              <p class="text-sm  mt-1">Perfect for growing teams</p>
+            </div>
+          </template>
+
+          <!-- Card Body -->
+          <div class="p-6">
+            <!-- Price -->
+            <div class="mb-6">
+              <div class="text-5xl font-bold text-primary">£15</div>
+              <div class="text-sm  mt-2">/month</div>
+            </div>
+
+            <!-- Divider -->
+            <div class="border-t my-6"></div>
+
+            <!-- Features -->
+            <div class="space-y-4">
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">2,000 total pages</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">500 monthly file uploads</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">20 GB monthly bandwidth</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">AI summarization for document search</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">Priority support</span>
+              </div>
+            </div>
+          </div>
+        </UCard>
+
+        <!-- Max Tier Card -->
+        <UCard
+          variant="subtle"
+          class="rounded-xl overflow-hidden ring-2 ring-white/20"
+        >
+          <!-- Card Header -->
+          <template #header>
+            <div class="p-6">
+              <h3 class="text-2xl font-bold text-primary">Max</h3>
+              <p class="text-sm  mt-1">For power users and professionals</p>
+            </div>
+          </template>
+
+          <!-- Card Body -->
+          <div class="p-6">
+            <!-- Price -->
+            <div class="mb-6">
+              <div class="text-5xl font-bold text-primary">£90</div>
+              <div class="text-sm  mt-2">/month</div>
+            </div>
+
+            <!-- Divider -->
+            <div class="border-t my-6"></div>
+
+            <!-- Features -->
+            <div class="space-y-4">
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">10,000 total pages</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">2,000 monthly file uploads</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">100 GB monthly bandwidth</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">AI summarization for document search</span>
+              </div>
+              <div class="flex items-center ">
+                <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
+                <span class="text-sm">Priority support</span>
+              </div>
+            </div>
+          </div>
+        </UCard>
+      </div>
+
+      <!-- Action Buttons Grid - Aligned with Cards Above -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-6xl mx-auto mb-12">
+        <!-- Free Tier Button -->
+        <div>
+          <UButton
+            v-if="!user"
+            to="/login"
+            class="w-full"
+            size="lg"
+          >
+            Get Started
+          </UButton>
+          <UButton
+            v-else-if="!userTier || userTier === 'free'"
+            disabled
+            variant="soft"
+            class="w-full"
+            size="lg"
+          >
+            <UIcon name="i-heroicons-check-20-solid" class="w-5 h-5 mr-2" />
+            Current Plan
+          </UButton>
+          <UButton
+            v-else
+            @click="navigateToUpgrade"
+            variant="soft"
+            class="w-full"
+            size="lg"
+          >
+            Downgrade
+          </UButton>
+        </div>
+
+        <!-- Pro Tier Button -->
+        <div>
+          <UButton
+            v-if="!user"
+            to="/login"
+            class="w-full"
+            size="lg"
+          >
+            Choose Pro
+          </UButton>
+          <UButton
+            v-else-if="!userTier || userTier === 'free'"
+            @click="selectTier('pro')"
+            :loading="loading"
+            class="w-full"
+            size="lg"
+          >
+            Upgrade to Pro
+          </UButton>
+          <UButton
+            v-else-if="userTier === 'pro'"
+            disabled
+            variant="soft"
+            class="w-full"
+            size="lg"
+          >
+            <UIcon name="i-heroicons-check-20-solid" class="w-5 h-5 mr-2" />
+            Current Plan
+          </UButton>
+          <UButton
+            v-else-if="userTier === 'max'"
+            @click="navigateToBillingPortal"
+            variant="soft"
+            class="w-full"
+            size="lg"
+          >
+            Downgrade to Pro
+          </UButton>
+        </div>
+
+        <!-- Max Tier Button -->
+        <div>
+          <UButton
+            v-if="!user"
+            to="/login"
+            class="w-full"
+            size="lg"
+          >
+            Choose Max
+          </UButton>
+          <UButton
+            v-else-if="!userTier || userTier === 'free'"
+            @click="selectTier('max')"
+            :loading="loading"
+            class="w-full"
+            size="lg"
+          >
+            Upgrade to Max
+          </UButton>
+          <UButton
+            v-else-if="userTier === 'max'"
+            disabled
+            variant="soft"
+            class="w-full"
+            size="lg"
+          >
+            <UIcon name="i-heroicons-check-20-solid" class="w-5 h-5 mr-2" />
+            Current Plan
+          </UButton>
+          <UButton
+            v-else-if="userTier === 'pro'"
+            @click="selectTier('max')"
+            :loading="loading"
+            class="w-full"
+            size="lg"
+          >
+            Upgrade to Max
+          </UButton>
+        </div>
+      </div>
+
+      <!-- Error Message -->
+      <div v-if="error" class="mt-8 max-w-2xl mx-auto">
+        <UAlert
+          icon="i-heroicons-exclamation-triangle-20-solid"
+          color="error"
+          :title="error"
+          variant="soft"
+        />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useStripe } from '~/composables/useStripe'
+
+const user = useSupabaseUser()
+const client = useSupabaseClient()
+const { createCheckoutSession, getSubscriptionStatus, loading, error } = useStripe()
+
+const userTier = ref<'free' | 'pro' | 'max' | null>(null)
+
+onMounted(async () => {
+  try {
+    if (user.value) {
+      const session = await client.auth.getSession()
+      const token = session?.data?.session?.access_token
+      if (token) {
+        const status = await getSubscriptionStatus(token)
+        userTier.value = (status?.tier || 'free') as 'free' | 'pro' | 'max'
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load subscription status:', err)
+  }
+})
+
+const selectTier = async (tier: 'pro' | 'max') => {
+  try {
+    const session = await client.auth.getSession()
+    const token = session?.data?.session?.access_token
+    if (token) {
+      await createCheckoutSession(token, tier)
+    } else {
+      error.value = 'Not authenticated. Please log in first.'
+    }
+  } catch (err) {
+    console.error('Failed to select tier:', err)
+  }
+}
+
+const navigateToBillingPortal = () => {
+  error.value = 'Billing portal management coming soon. Please contact support to change your plan.'
+}
+
+const navigateToUpgrade = () => {
+  navigateTo('/pricing#pro')
+}
+</script>

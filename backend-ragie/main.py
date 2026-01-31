@@ -56,6 +56,18 @@ async def startup_event():
     logger.info(f"API Prefix: {settings.api_prefix}")
     logger.info(f"Debug Mode: {settings.debug}")
 
+    # Security: Validate Stripe webhook secret is configured
+    if not settings.stripe_webhook_secret:
+        logger.error(
+            "CRITICAL: STRIPE_WEBHOOK_SECRET is not configured. "
+            "Webhook signature validation will fail. "
+            "Set STRIPE_WEBHOOK_SECRET environment variable."
+        )
+        raise RuntimeError(
+            "STRIPE_WEBHOOK_SECRET is not configured. "
+            "Webhook endpoint requires valid signature verification."
+        )
+
 
 @app.on_event("shutdown")
 async def shutdown_event():

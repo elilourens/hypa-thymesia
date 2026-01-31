@@ -131,31 +131,32 @@ async def list_videos(
 ):
     """List user's videos (from ragie_documents) with filtering and pagination."""
     try:
-        # Query ragie_documents
+        # Query ragie_documents with database-level pagination
         query = supabase.table("ragie_documents").select("*").eq("user_id", current_user.id)
 
         if group_id:
             query = query.eq("group_id", group_id)
 
-        # Execute query
-        response = query.execute()
-        all_docs = response.data or []
-
-        # Sort results
+        # Apply sorting at database level
         desc = dir == "desc"
         if sort == "created_at":
-            all_docs.sort(key=lambda x: x["created_at"], reverse=desc)
+            query = query.order("created_at", desc=desc)
         elif sort == "filename":
-            all_docs.sort(key=lambda x: x["filename"].lower(), reverse=desc)
+            query = query.order("filename", desc=desc)
         elif sort == "duration_seconds":
-            all_docs.sort(key=lambda x: x.get("duration_seconds") or 0, reverse=desc)
+            query = query.order("duration_seconds", desc=desc)
 
-        # Get total count
-        total_count = len(all_docs)
-
-        # Apply pagination
+        # Apply pagination at database level
         offset = (page - 1) * page_size
-        paginated_docs = all_docs[offset:offset + page_size]
+        response = query.range(offset, offset + page_size - 1).execute()
+        paginated_docs = response.data or []
+
+        # Get total count (all matching videos, not just this page)
+        count_query = supabase.table("ragie_documents").select("*").eq("user_id", current_user.id)
+        if group_id:
+            count_query = count_query.eq("group_id", group_id)
+        count_response = count_query.execute()
+        total_count = len(count_response.data or [])
 
         # Fetch group names
         group_names = {}

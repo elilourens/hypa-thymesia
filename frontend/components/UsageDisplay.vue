@@ -218,9 +218,7 @@ async function refreshQuota() {
       <div class="p-8 bg-zinc-900 rounded-lg border border-zinc-800">
         <div class="text-center">
           <h3 class="text-lg font-semibold text-zinc-200 mb-3">Want higher limits?</h3>
-          <p class="text-sm text-zinc-400 mb-6">
-            <strong>Premium Plan</strong> includes <strong>2000 pages</strong> of storage and <strong>500 monthly uploads</strong>
-          </p>
+          
           <UButton
             color="primary"
             variant="solid"

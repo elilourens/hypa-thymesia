@@ -24,6 +24,15 @@ def get_supabase(current_user: AuthUser = Depends(get_current_user)) -> Client:
     return _get_supabase_admin()
 
 
+def get_supabase_for_webhook() -> Client:
+    """Get Supabase client for webhook handlers (no auth required).
+
+    Used for endpoints that receive requests from external services (e.g., Stripe)
+    where JWT authentication is not applicable.
+    """
+    return _get_supabase_admin()
+
+
 @lru_cache(maxsize=1)
 def get_ragie_client() -> Ragie:
     """Get Ragie client (cached singleton)."""

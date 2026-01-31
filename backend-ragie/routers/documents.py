@@ -125,30 +125,55 @@ async def list_documents(
         if group_id:
             query = query.eq("group_id", group_id)
 
-        # Execute to get all matching results (before pagination)
-        response = query.execute()
-        all_docs = response.data or []
-
-        # Apply search filter (case-insensitive exact match on filename)
+        # If search is applied, we need to fetch all docs for client-side filtering
+        # Otherwise, use database pagination
         if search:
+            # Fetch all matching documents for search filtering
+            response = query.execute()
+            all_docs = response.data or []
+
+            # Apply search filter (case-insensitive)
             search_lower = search.lower()
             all_docs = [doc for doc in all_docs if search_lower in doc["filename"].lower()]
 
-        # Sort results
-        desc = dir == "desc"
-        if sort == "created_at":
-            all_docs.sort(key=lambda x: x["created_at"], reverse=desc)
-        elif sort == "filename":
-            all_docs.sort(key=lambda x: x["filename"].lower(), reverse=desc)
-        elif sort == "page_count":
-            all_docs.sort(key=lambda x: x.get("page_count") or 0, reverse=desc)
+            # Sort results
+            desc = dir == "desc"
+            if sort == "created_at":
+                all_docs.sort(key=lambda x: x["created_at"], reverse=desc)
+            elif sort == "filename":
+                all_docs.sort(key=lambda x: x["filename"].lower(), reverse=desc)
+            elif sort == "page_count":
+                all_docs.sort(key=lambda x: x.get("page_count") or 0, reverse=desc)
 
-        # Get total count after filtering but before pagination
-        total_count = len(all_docs)
+            total_count = len(all_docs)
+            offset = (page - 1) * page_size
+            paginated_docs = all_docs[offset:offset + page_size]
+        else:
+            # Use database-level pagination for better performance
+            desc = dir == "desc"
+            if sort == "created_at":
+                query = query.order("created_at", desc=desc)
+            elif sort == "filename":
+                query = query.order("filename", desc=desc)
+            elif sort == "page_count":
+                query = query.order("page_count", desc=desc)
 
-        # Apply pagination
-        offset = (page - 1) * page_size
-        paginated_docs = all_docs[offset:offset + page_size]
+            # Apply pagination (note: Supabase doesn't support count with range in single query)
+            # So we first get count, then fetch page
+            offset = (page - 1) * page_size
+
+            # Get paginated results
+            response = query.range(offset, offset + page_size - 1).execute()
+            paginated_docs = response.data or []
+
+            # Get total count for this query (all matching docs, not just this page)
+            count_response = supabase.table("ragie_documents").select(
+                "*"
+            ).eq("user_id", current_user.id)
+            if group_id:
+                count_response = count_response.eq("group_id", group_id)
+            count_response = count_response.execute()
+            total_count = len(count_response.data or [])
 
         # Fetch group names for documents with group_id
         group_names = {}

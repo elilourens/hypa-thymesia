@@ -6,12 +6,44 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_FILES = 200  # Free tier default (pages)
-PREMIUM_MAX_FILES = 2000  # Premium tier (pages)
+# Free tier limits
+DEFAULT_MAX_FILES = 200  # Free tier (pages)
 DEFAULT_MAX_MONTHLY_FILES = 50  # Free tier monthly uploads
-PREMIUM_MAX_MONTHLY_FILES = 500  # Premium tier monthly uploads
-DEFAULT_MAX_MONTHLY_THROUGHPUT = 5 * 1024**3  # 5 GB in bytes for free tier
-PREMIUM_MAX_MONTHLY_THROUGHPUT = 20 * 1024**3  # 20 GB in bytes for premium
+DEFAULT_MAX_MONTHLY_THROUGHPUT = 5 * 1024**3  # 5 GB in bytes
+
+# Pro tier limits (£15/month)
+PRO_MAX_FILES = 2000  # Pro tier (pages)
+PRO_MAX_MONTHLY_FILES = 500  # Pro tier monthly uploads
+PRO_MAX_MONTHLY_THROUGHPUT = 20 * 1024**3  # 20 GB in bytes
+
+# Max tier limits (£90/month)
+MAX_MAX_FILES = 10000  # Max tier (pages)
+MAX_MAX_MONTHLY_FILES = 2000  # Max tier monthly uploads
+MAX_MAX_MONTHLY_THROUGHPUT = 100 * 1024**3  # 100 GB in bytes
+
+# Legacy names for backwards compatibility
+PREMIUM_MAX_FILES = PRO_MAX_FILES
+PREMIUM_MAX_MONTHLY_FILES = PRO_MAX_MONTHLY_FILES
+PREMIUM_MAX_MONTHLY_THROUGHPUT = PRO_MAX_MONTHLY_THROUGHPUT
+
+# Tier mapping for easy lookup
+TIER_LIMITS = {
+    "free": {
+        "max_files": DEFAULT_MAX_FILES,
+        "max_monthly_files": DEFAULT_MAX_MONTHLY_FILES,
+        "max_monthly_throughput": DEFAULT_MAX_MONTHLY_THROUGHPUT,
+    },
+    "pro": {
+        "max_files": PRO_MAX_FILES,
+        "max_monthly_files": PRO_MAX_MONTHLY_FILES,
+        "max_monthly_throughput": PRO_MAX_MONTHLY_THROUGHPUT,
+    },
+    "max": {
+        "max_files": MAX_MAX_FILES,
+        "max_monthly_files": MAX_MAX_MONTHLY_FILES,
+        "max_monthly_throughput": MAX_MAX_MONTHLY_THROUGHPUT,
+    },
+}
 
 
 def _get_user_settings_once(supabase, user_id: str) -> dict:
@@ -214,6 +246,8 @@ def add_to_user_monthly_file_count(supabase, user_id: str) -> bool:
     Automatically resets on the 1st of each month (month is keyed by YYYY-MM).
     This maintains a permanent record that is NOT affected by file deletions.
 
+    Uses upsert for atomic operation (single database call instead of select+insert/update).
+
     Args:
         supabase: Supabase client
         user_id: User ID
@@ -225,29 +259,24 @@ def add_to_user_monthly_file_count(supabase, user_id: str) -> bool:
         now = datetime.utcnow()
         current_month = now.strftime("%Y-%m")
 
-        # Try to update existing record
+        # Get current count for incrementation
         response = supabase.table("user_monthly_file_count").select(
-            "id, total_files_uploaded"
+            "total_files_uploaded"
         ).eq("user_id", user_id).eq("month", current_month).execute()
 
+        current_count = 0
         if response.data and len(response.data) > 0:
-            # Update existing record: increment by 1
-            record = response.data[0]
-            record_id = record["id"]
-            current_count = record.get("total_files_uploaded", 0)
-            new_total = current_count + 1
+            current_count = response.data[0].get("total_files_uploaded", 0)
 
-            supabase.table("user_monthly_file_count").update({
-                "total_files_uploaded": new_total,
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", record_id).execute()
-        else:
-            # Create new record for this month
-            supabase.table("user_monthly_file_count").insert({
-                "user_id": user_id,
-                "month": current_month,
-                "total_files_uploaded": 1
-            }).execute()
+        new_total = current_count + 1
+
+        # Upsert: update if exists by (user_id, month), otherwise insert
+        supabase.table("user_monthly_file_count").upsert({
+            "user_id": user_id,
+            "month": current_month,
+            "total_files_uploaded": new_total,
+            "updated_at": datetime.utcnow().isoformat()
+        }, on_conflict="user_id,month").execute()
 
         logger.info(f"Incremented monthly file count for user {user_id} in month {current_month}")
         return True
@@ -332,6 +361,8 @@ def add_to_user_monthly_throughput(supabase, user_id: str, bytes_uploaded: int) 
     Add bytes to a user's current month throughput. Creates the record if it doesn't exist.
     Automatically resets on the 1st of each month (month is keyed by YYYY-MM).
 
+    Uses upsert for atomic operation (single database call instead of select+insert/update).
+
     Args:
         supabase: Supabase client
         user_id: User ID
@@ -344,29 +375,24 @@ def add_to_user_monthly_throughput(supabase, user_id: str, bytes_uploaded: int) 
         now = datetime.utcnow()
         current_month = now.strftime("%Y-%m")
 
-        # Try to update existing record
+        # Get current bytes for accumulation
         response = supabase.table("user_monthly_throughput").select(
-            "id, total_bytes_uploaded"
+            "total_bytes_uploaded"
         ).eq("user_id", user_id).eq("month", current_month).execute()
 
+        current_bytes = 0
         if response.data and len(response.data) > 0:
-            # Update existing record: fetch current value and add to it
-            record = response.data[0]
-            record_id = record["id"]
-            current_bytes = record.get("total_bytes_uploaded", 0)
-            new_total = current_bytes + bytes_uploaded
+            current_bytes = response.data[0].get("total_bytes_uploaded", 0)
 
-            supabase.table("user_monthly_throughput").update({
-                "total_bytes_uploaded": new_total,
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", record_id).execute()
-        else:
-            # Create new record for this month
-            supabase.table("user_monthly_throughput").insert({
-                "user_id": user_id,
-                "month": current_month,
-                "total_bytes_uploaded": bytes_uploaded
-            }).execute()
+        new_total = current_bytes + bytes_uploaded
+
+        # Upsert: update if exists by (user_id, month), otherwise insert
+        supabase.table("user_monthly_throughput").upsert({
+            "user_id": user_id,
+            "month": current_month,
+            "total_bytes_uploaded": new_total,
+            "updated_at": datetime.utcnow().isoformat()
+        }, on_conflict="user_id,month").execute()
 
         logger.info(f"Added {bytes_uploaded} bytes to throughput for user {user_id} in month {current_month}")
         return True
