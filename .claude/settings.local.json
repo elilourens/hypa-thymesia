@@ -3,5 +3,12 @@
   "enabledMcpjsonServers": [
     "nuxt-ui-remote",
     "supabase"
-  ]
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix Docker build and add environment-based CORS configuration\n\n- Update poetry install to use --only main instead of deprecated --no-dev\n- Add system dependencies for OpenCV \\(libgl1, libglib2.0-0, libxcb1\\)\n- Add APP_ENV variable for dev/production configuration\n- Implement environment-based CORS origins \\(localhost for dev, smartquery.app for prod\\)\n\nCo-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)"
+    ]
+  }
 }
