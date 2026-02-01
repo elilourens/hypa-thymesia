@@ -6,13 +6,16 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 RUN pip install --no-cache-dir poetry
 COPY pyproject.toml poetry.lock* ./
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-dev --no-root
+    poetry install --only main --no-root
 
 # Copy application code
 COPY . .
