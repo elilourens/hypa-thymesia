@@ -227,14 +227,21 @@ async def get_document(
 ):
     """Get a specific document."""
     try:
+        # Try ragie_document_id first (what Ragie sends), then fallback to internal id
         response = supabase.table("ragie_documents").select(
             "*"
-        ).eq("id", doc_id).eq("user_id", current_user.id).single().execute()
+        ).eq("ragie_document_id", doc_id).eq("user_id", current_user.id).execute()
 
-        if not response.data:
+        if not response.data or len(response.data) == 0:
+            # Fallback to internal id
+            response = supabase.table("ragie_documents").select(
+                "*"
+            ).eq("id", doc_id).eq("user_id", current_user.id).execute()
+
+        if not response.data or len(response.data) == 0:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        doc = response.data
+        doc = response.data[0]
 
         # Fetch group name if document has a group
         group_name = None
@@ -277,15 +284,21 @@ async def delete_document(
 ):
     """Delete a document."""
     try:
-        # Get document from database
+        # Get document from database - try by id first, then ragie_document_id
         response = supabase.table("ragie_documents").select(
             "*"
-        ).eq("id", doc_id).eq("user_id", current_user.id).single().execute()
+        ).eq("id", doc_id).eq("user_id", current_user.id).execute()
 
-        if not response.data:
+        if not response.data or len(response.data) == 0:
+            # Try by ragie_document_id instead
+            response = supabase.table("ragie_documents").select(
+                "*"
+            ).eq("ragie_document_id", doc_id).eq("user_id", current_user.id).execute()
+
+        if not response.data or len(response.data) == 0:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        doc = response.data
+        doc = response.data[0]
 
         # Check if this is a video document (has storage_bucket field)
         if doc.get("storage_bucket"):
@@ -326,15 +339,21 @@ async def update_document(
 ):
     """Update a document's group."""
     try:
-        # Get document from database
+        # Get document from database - try by id first, then ragie_document_id
         response = supabase.table("ragie_documents").select(
             "*"
-        ).eq("id", doc_id).eq("user_id", current_user.id).single().execute()
+        ).eq("id", doc_id).eq("user_id", current_user.id).execute()
 
-        if not response.data:
+        if not response.data or len(response.data) == 0:
+            # Try by ragie_document_id instead
+            response = supabase.table("ragie_documents").select(
+                "*"
+            ).eq("ragie_document_id", doc_id).eq("user_id", current_user.id).execute()
+
+        if not response.data or len(response.data) == 0:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        doc = response.data
+        doc = response.data[0]
 
         # Update metadata in Ragie
         if doc.get("ragie_document_id"):
@@ -397,15 +416,21 @@ async def get_document_status(
 ):
     """Get document processing status."""
     try:
-        # Get from database
+        # Get from database - try by id first, then ragie_document_id
         response = supabase.table("ragie_documents").select(
             "*"
-        ).eq("id", doc_id).eq("user_id", current_user.id).single().execute()
+        ).eq("id", doc_id).eq("user_id", current_user.id).execute()
 
-        if not response.data:
+        if not response.data or len(response.data) == 0:
+            # Try by ragie_document_id instead
+            response = supabase.table("ragie_documents").select(
+                "*"
+            ).eq("ragie_document_id", doc_id).eq("user_id", current_user.id).execute()
+
+        if not response.data or len(response.data) == 0:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        doc = response.data
+        doc = response.data[0]
 
         # Get latest status from Ragie
         if doc.get("ragie_document_id"):
