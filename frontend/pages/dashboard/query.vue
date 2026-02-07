@@ -6,11 +6,14 @@ import { useDocuments, type DocumentItem } from '@/composables/useDocuments'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
 import ResultList from '@/components/ResultList.vue'
-import FileGrid from '@/components/FileGrid.vue'
+import FileGrid, { type ContextMenuItem } from '@/components/FileGrid.vue'
+import { useFilesApi } from '@/composables/useFiles'
 
 
 const { search } = useSearch()
-const { listDocuments, getDocument } = useDocuments()
+const { listDocuments, getDocument, deleteDocument } = useDocuments()
+const { getSignedUrl, getVideoInfo } = useFilesApi()
+const toast = useToast()
 
 // ========== Search Mode Toggle ==========
 const searchMode = ref<'files' | 'content'>('files')
@@ -335,15 +338,90 @@ watch(selectedGroup, () => {
 
 // ========== File Opening ==========
 
-function handleOpenFile(file: DocumentItem) {
-  // Navigate to files page with filename filter for now
-  // (Full file preview would require storage_path in DocumentItem)
-  navigateTo(`/dashboard/files?search=${encodeURIComponent(file.filename)}`)
+async function handleOpenFile(file: DocumentItem) {
+  try {
+    const mime = file.mime_type || ''
+    let url: string
+
+    // For videos, fetch from Supabase storage (cheaper egress than Ragie)
+    if (mime.startsWith('video/')) {
+      const info = await getVideoInfo(file.id)
+      url = await getSignedUrl(info.bucket, info.storage_path, false)
+    } else {
+      url = await getSignedUrl('ragie', file.ragie_document_id || file.id, false)
+    }
+
+    if (!url) throw new Error('No URL returned')
+
+    if (mime.includes('application/pdf')) {
+      window.open(`${url}#page=1`, '_blank')
+    } else if (mime.includes('officedocument.wordprocessingml.document')) {
+      window.open(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}`, '_blank')
+    } else {
+      window.open(url, '_blank')
+    }
+  } catch (err: any) {
+    toast.add({
+      title: 'Could not open file',
+      description: err.message || 'Error opening file',
+      color: 'error',
+    })
+  }
 }
 
 // ========== Copy Results ==========
 
 const copyFeedback = ref(false)
+
+// ========== Context Menu ==========
+
+const fileToDelete = ref<DocumentItem | null>(null)
+const showDeleteConfirm = ref(false)
+
+const fileContextMenuItems: ContextMenuItem[] = [
+  {
+    label: 'Open',
+    icon: 'i-lucide-external-link',
+    action: (file) => handleOpenFile(file),
+  },
+  {
+    label: 'Copy filename',
+    icon: 'i-lucide-copy',
+    action: async (file) => {
+      await navigator.clipboard.writeText(file.filename)
+      toast.add({ title: 'Copied filename', color: 'success' })
+    },
+  },
+  {
+    label: 'Delete',
+    icon: 'i-lucide-trash-2',
+    separator: true,
+    action: (file) => {
+      fileToDelete.value = file
+      showDeleteConfirm.value = true
+    },
+  },
+]
+
+async function confirmDelete() {
+  if (!fileToDelete.value) return
+  try {
+    await deleteDocument(fileToDelete.value.id)
+    // Remove from all local lists
+    const id = fileToDelete.value.id
+    filenameMatches.value = filenameMatches.value.filter(f => f.id !== id)
+    semanticMatches.value = semanticMatches.value.filter(f => f.id !== id)
+    filesResults.value = filesResults.value.filter(f => f.id !== id)
+    toast.add({ title: 'File deleted', color: 'success' })
+  } catch (e: any) {
+    toast.add({ title: 'Delete failed', description: e.message, color: 'error' })
+  } finally {
+    showDeleteConfirm.value = false
+    fileToDelete.value = null
+  }
+}
+
+// ========== Copy Results ==========
 
 async function copyAllChunks() {
   const allText = results.value
@@ -454,6 +532,7 @@ async function copyAllChunks() {
             :loading="filesLoading"
             :enable-hover-preview="true"
             :chunk-map="chunkMap"
+            :context-menu-items="fileContextMenuItems"
             @open-file="handleOpenFile"
           />
         </div>
@@ -474,6 +553,7 @@ async function copyAllChunks() {
             :loading="filesLoading"
             :enable-hover-preview="true"
             :chunk-map="chunkMap"
+            :context-menu-items="fileContextMenuItems"
             @open-file="handleOpenFile"
           />
         </div>
@@ -524,4 +604,20 @@ async function copyAllChunks() {
       </div>
     </div>
   </BodyCard>
+
+  <!-- Delete Confirmation Modal -->
+  <UModal v-model:open="showDeleteConfirm">
+    <template #content>
+      <div class="p-6 space-y-4">
+        <h3 class="text-lg font-semibold">Delete file</h3>
+        <p class="text-foreground/70">
+          Are you sure you want to delete <strong>{{ fileToDelete?.filename }}</strong>? This action cannot be undone.
+        </p>
+        <div class="flex justify-end gap-3">
+          <UButton variant="ghost" @click="showDeleteConfirm = false">Cancel</UButton>
+          <UButton color="error" @click="confirmDelete">Delete</UButton>
+        </div>
+      </div>
+    </template>
+  </UModal>
 </template>

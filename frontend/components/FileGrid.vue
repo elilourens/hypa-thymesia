@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import type { DocumentItem } from '@/composables/useDocuments'
 
+export interface ContextMenuItem {
+  label: string
+  icon?: string
+  action: (file: DocumentItem) => void
+  separator?: boolean
+}
+
 interface Props {
   files: DocumentItem[]
   loading?: boolean
   enableHoverPreview?: boolean
   chunkMap?: Map<string, any>
+  contextMenuItems?: ContextMenuItem[]
 }
 
 const props = defineProps<Props>()
@@ -47,6 +55,57 @@ function getFileIcon(mimeType?: string): string {
 const emit = defineEmits<{
   'open-file': [file: DocumentItem]
 }>()
+
+// Context menu state
+const contextMenu = ref<{ x: number; y: number; file: DocumentItem } | null>(null)
+const contextMenuRef = ref<HTMLElement | null>(null)
+
+function onContextMenu(e: MouseEvent, file: DocumentItem) {
+  if (!props.contextMenuItems?.length) return
+  e.preventDefault()
+
+  // Position menu, clamping to viewport edges
+  const menuWidth = 200
+  const menuHeight = props.contextMenuItems.length * 36 + 16
+  const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8)
+  const y = Math.min(e.clientY, window.innerHeight - menuHeight - 8)
+
+  contextMenu.value = { x, y, file }
+}
+
+function closeContextMenu() {
+  contextMenu.value = null
+}
+
+function onMenuItemClick(item: ContextMenuItem) {
+  if (contextMenu.value) {
+    item.action(contextMenu.value.file)
+  }
+  closeContextMenu()
+}
+
+// Close on click outside or Escape
+function onClickOutside(e: MouseEvent) {
+  if (contextMenuRef.value && !contextMenuRef.value.contains(e.target as Node)) {
+    closeContextMenu()
+  }
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeContextMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onClickOutside)
+  document.addEventListener('keydown', onKeydown)
+  window.addEventListener('scroll', closeContextMenu, true)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onClickOutside)
+  document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('scroll', closeContextMenu, true)
+})
 </script>
 
 <template>
@@ -71,6 +130,7 @@ const emit = defineEmits<{
           class="flex flex-col cursor-pointer border border-transparent hover:border-primary-500 hover:shadow-md transition-all text-left w-full gap-0 bg-transparent"
           :ui="{ body: 'p-0' }"
           @click="emit('open-file', file)"
+          @contextmenu="onContextMenu($event, file)"
         >
           <!-- File Thumbnail or Icon -->
           <div class="flex justify-center items-center" style="height: 120px">
@@ -127,5 +187,26 @@ const emit = defineEmits<{
       <UIcon name="i-lucide-folder-open" class="w-12 h-12 mx-auto mb-4 text-foreground/40" />
       <p class="text-foreground/60">No files found</p>
     </div>
+
+    <!-- Custom Context Menu -->
+    <Teleport to="body">
+      <div
+        v-if="contextMenu && contextMenuItems?.length"
+        ref="contextMenuRef"
+        class="fixed z-[100] min-w-[180px] rounded-md border border-foreground/10 bg-neutral-900 shadow-xl py-1 select-none overflow-hidden"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      >
+        <template v-for="(item, i) in contextMenuItems" :key="i">
+          <div v-if="item.separator" class="my-1 border-t border-foreground/10" />
+          <button
+            class="flex items-center gap-2 w-full px-3 py-2 text-sm text-foreground/80 hover:text-foreground hover:bg-white/10 transition-all duration-150 text-left group"
+            @click="onMenuItemClick(item)"
+          >
+            <UIcon v-if="item.icon" :name="item.icon" class="w-4 h-4 text-foreground/50 group-hover:text-foreground transition-colors duration-150" />
+            <span>{{ item.label }}</span>
+          </button>
+        </template>
+      </div>
+    </Teleport>
   </div>
 </template>

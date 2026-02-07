@@ -104,6 +104,12 @@ export function useFilesApi() {
   async function getSignedUrl(bucket: string, path: string, download: boolean = false): Promise<string> {
     const headers = await authHeaders()
 
+    // For Ragie documents, fetch with auth and return blob URL
+    // (the proxy endpoint requires auth headers which window.open/img src can't provide)
+    if (bucket === 'ragie') {
+      return getRagieImageUrl(path)
+    }
+
     try {
       const res = await $fetch<{ signed_url: string; provider?: string }>(
         `${API_BASE}/storage/signed-url`,

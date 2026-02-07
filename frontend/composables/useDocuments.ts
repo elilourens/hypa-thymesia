@@ -9,6 +9,7 @@ export type SortDir = 'asc' | 'desc'
 export interface DocumentItem {
   id: string
   user_id: string
+  ragie_document_id: string | null
   filename: string
   mime_type: string
   file_size_bytes: number | null
