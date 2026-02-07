@@ -34,7 +34,8 @@ export default defineNuxtConfig({
         '/reset-password',
         '/confirm',        // callback itself
         '/auth/**',        // if you have any auth-prefixed routes
-        '/privacy'         // privacy policy page
+        '/privacy',        // privacy policy page
+        '/pricing'         // pricing page
       ]
     }
   }

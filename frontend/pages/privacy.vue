@@ -58,7 +58,8 @@ useSeoMeta({
             <p>We process your personal data for the following purposes and on the following legal bases:</p>
             <ul>
               <li>To provide, maintain, and improve the Service</li>
-              <li>To process and store your uploaded content and enable semantic search & AI-powered features</li>
+              <li>To process and store your uploaded content via Ragie and enable semantic search & AI-powered features</li>
+              <li>To extract, chunk, and index content from your documents for search and retrieval</li>
               <li>To personalise your experience and develop new features</li>
               <li>To communicate service updates, security notices, or respond to support requests</li>
               <li>To detect, prevent and investigate fraud, abuse, or security incidents</li>
@@ -77,7 +78,7 @@ useSeoMeta({
               <li>Strict access controls and multi-factor authentication for our team</li>
               <li>Data minimisation and pseudonymisation where possible</li>
             </ul>
-            <p>Your relational data and authentication information are primarily hosted in Supabase projects configured in EU regions where available. Vector embeddings are stored with Pinecone. Some AI processing (e.g. LLM inference) occurs with providers in the United States or other jurisdictions.</p>
+            <p>Your relational data and authentication information are primarily hosted in Supabase projects configured in EU regions where available. Uploaded documents are processed by Ragie for content extraction and chunking. Vector embeddings are stored with Pinecone. Some AI processing (e.g. LLM inference) occurs with providers in the United States or other jurisdictions.</p>
           </section>
 
           <USeparator />
@@ -87,7 +88,7 @@ useSeoMeta({
             <p>We share data with the following subprocessors (acting as data processors on our instructions):</p>
             <ul>
               <li><strong>Supabase</strong> – Authentication, PostgreSQL database → <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Privacy Policy</a> | <a href="https://supabase.com/legal/dpa" target="_blank" rel="noopener">DPA</a></li>
-              <li><strong>Pinecone</strong> – Vector database for semantic search → <a href="https://www.pinecone.io/privacy" target="_blank" rel="noopener">Privacy Policy</a> | <a href="https://www.pinecone.io/legal/data-processing-addendum" target="_blank" rel="noopener">DPA</a></li>
+              <li><strong>Ragie</strong> – Document processing, content extraction, and chunking for semantic search → <a href="https://www.ragie.ai/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a></li>
               <li>Cloudflare – Edge caching, DDoS protection → <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Privacy Policy</a></li>
               <li>Stripe – Payment processing (card data never reaches our servers) → <a href="https://stripe.com/gb/privacy" target="_blank" rel="noopener">Privacy Policy</a></li>
             </ul>

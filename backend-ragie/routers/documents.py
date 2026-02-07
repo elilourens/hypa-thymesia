@@ -23,7 +23,7 @@ def get_video_service(current_user: AuthUser = Depends(get_current_user), supaba
 
 
 @router.post("/upload", response_model=DocumentResponse)
-@rate_limit(calls_per_minute=10)
+@rate_limit(calls_per_minute=60)
 async def upload_document(
     file: UploadFile = File(...),
     group_id: Optional[str] = Query(None),
@@ -107,7 +107,7 @@ async def upload_document(
 
 
 @router.get("/list", response_model=DocumentListResponse)
-@rate_limit(calls_per_minute=10)
+@rate_limit(calls_per_minute=60)
 async def list_documents(
     group_id: Optional[str] = Query(None),
     page: int = Query(1, ge=1),

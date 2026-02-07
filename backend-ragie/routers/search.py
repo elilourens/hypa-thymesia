@@ -97,7 +97,7 @@ def _enrich_chunk_metadata(chunk, supabase: Client) -> dict:
 
 
 @router.post("/retrieve", response_model=SearchResponse)
-@rate_limit(calls_per_minute=10)
+@rate_limit(calls_per_minute=60)
 async def retrieve(
     request: SearchRequest,
     current_user: AuthUser = Depends(get_current_user),

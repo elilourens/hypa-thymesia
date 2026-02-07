@@ -258,6 +258,20 @@ onMounted(() => {
   </UMarquee>
 </BodyCard>
 
+<!-- Footer -->
+<footer class="page-footer">
+  <div class="footer-content">
+    <div class="footer-section">
+      <p>&copy; 2026 SmartQuery Ltd. All rights reserved.</p>
+    </div>
+    <div class="footer-links">
+      <NuxtLink to="/privacy" class="footer-link">Privacy Policy</NuxtLink>
+      <span class="footer-divider">•</span>
+      <NuxtLink to="/terms" class="footer-link">Terms of Service</NuxtLink>
+    </div>
+  </div>
+</footer>
+
 </template>
 
 <style scoped>
@@ -398,6 +412,54 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+}
+
+/* Footer styles */
+.page-footer {
+  background-color: #1a1a1a;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2rem;
+  color: white;
+}
+
+.footer-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  text-align: center;
+}
+
+.footer-section p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #999;
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.footer-link {
+  color: #60a5fa;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.footer-link:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.footer-divider {
+  color: #666;
 }
 </style>
 
