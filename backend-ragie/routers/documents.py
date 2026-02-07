@@ -11,6 +11,7 @@ from core.rate_limiting import rate_limit
 from core.user_limits import check_user_can_upload, get_user_quota_status, add_to_user_monthly_throughput, add_to_user_monthly_file_count
 from services.ragie_service import RagieService
 from services.video_service import VideoService
+from services.thumbnail_service import ThumbnailService
 from schemas import DocumentResponse, DocumentListResponse, DocumentDeleteResponse, DocumentStatusResponse
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,37 @@ async def upload_document(
             raise HTTPException(status_code=500, detail="Failed to create document record")
 
         doc = doc_record.data[0]
+
+        # Generate thumbnail for images
+        if file.content_type and file.content_type.startswith('image/'):
+            try:
+                # Re-read file bytes
+                file.file.seek(0)
+                image_bytes = file.file.read()
+
+                # Generate thumbnail
+                thumbnail_service = ThumbnailService(supabase)
+                thumbnail_bytes = thumbnail_service._generate_thumbnail(image_bytes)
+
+                if thumbnail_bytes:
+                    # Upload thumbnail
+                    thumbnail_path = thumbnail_service.upload_thumbnail(
+                        doc["id"],
+                        thumbnail_bytes
+                    )
+
+                    if thumbnail_path:
+                        # Update database record
+                        supabase.table("ragie_documents").update({
+                            "thumbnail_storage_path": thumbnail_path,
+                            "thumbnail_size_bytes": len(thumbnail_bytes),
+                            "has_thumbnail": True
+                        }).eq("id", doc["id"]).execute()
+
+                        logger.info(f"Thumbnail generated for {file.filename}")
+            except Exception as e:
+                # Don't fail the upload if thumbnail generation fails
+                logger.warning(f"Failed to generate thumbnail for {file.filename}: {e}")
 
         # Track upload throughput and file count
         add_to_user_monthly_throughput(supabase, current_user.id, file_size)

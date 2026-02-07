@@ -8,7 +8,26 @@ interface Props {
   chunkMap?: Map<string, any>
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
+
+// Thumbnail URL state
+const thumbnailUrls = ref<Record<string, string>>({})
+const { getThumbnailUrl } = useDocuments()
+
+// Watch for files changes and fetch thumbnails
+watch(() => props.files, async (newFiles) => {
+  if (!newFiles) return
+
+  // Fetch thumbnails for image and video files
+  for (const file of newFiles) {
+    if ((file.mime_type?.startsWith('image/') || file.mime_type?.startsWith('video/')) && !thumbnailUrls.value[file.id]) {
+      const url = await getThumbnailUrl(file.id)
+      if (url) {
+        thumbnailUrls.value[file.id] = url
+      }
+    }
+  }
+}, { immediate: true })
 
 // Helper function to get appropriate icon based on mime type
 function getFileIcon(mimeType?: string): string {
@@ -25,8 +44,6 @@ function getFileIcon(mimeType?: string): string {
   return 'i-lucide-file'
 }
 
-
-
 const emit = defineEmits<{
   'open-file': [file: DocumentItem]
 }>()
@@ -38,7 +55,7 @@ const emit = defineEmits<{
     <div
       v-if="!loading && files.length > 0"
       class="grid gap-1"
-      style="grid-template-columns: repeat(auto-fill, minmax(130px, 1fr))"
+      style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))"
     >
       <UPopover
         v-for="file in files"
@@ -51,21 +68,31 @@ const emit = defineEmits<{
       >
         <UCard
           as="button"
-          class="flex flex-col cursor-pointer border border-transparent hover:border-primary-500 hover:shadow-md transition-all text-left w-full gap-0"
+          class="flex flex-col cursor-pointer border border-transparent hover:border-primary-500 hover:shadow-md transition-all text-left w-full gap-0 bg-transparent"
           :ui="{ body: 'p-0' }"
           @click="emit('open-file', file)"
         >
-          <!-- File Icon -->
-          <div class="flex justify-center py-2">
+          <!-- File Thumbnail or Icon -->
+          <div class="flex justify-center items-center" style="height: 120px">
+            <!-- Show thumbnail for images and videos if available -->
+            <img
+              v-if="(file.mime_type?.startsWith('image/') || file.mime_type?.startsWith('video/')) && thumbnailUrls[file.id]"
+              :src="thumbnailUrls[file.id]"
+              :alt="file.filename"
+              class="w-full h-full object-cover rounded"
+              @error="() => delete thumbnailUrls[file.id]"
+            />
+            <!-- Fallback to icon -->
             <UIcon
+              v-else
               :name="getFileIcon(file.mime_type)"
-              class="w-18 h-18 text-primary-500"
+              class="w-12 h-12 text-primary-500"
             />
           </div>
 
           <!-- Filename -->
           <h3
-            class="font-medium text-[10px] text-foreground leading-tight whitespace-normal"
+            class="font-medium text-[11px] text-foreground leading-tight whitespace-normal mt-1"
             :title="file.filename"
           >
             {{ file.filename }}
@@ -88,7 +115,7 @@ const emit = defineEmits<{
     </div>
 
     <!-- Loading State -->
-    <div v-if="loading" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(130px, 1fr))">
+    <div v-if="loading" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))">
       <div v-for="i in 6" :key="i" class="h-24 bg-gray-200 dark:bg-gray-800 rounded-lg animate-pulse" />
     </div>
 

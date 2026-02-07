@@ -73,11 +73,11 @@ async def get_signed_url(
             )
 
             if not response:
-                raise HTTPException(status_code=404, detail="Failed to generate signed URL")
+                raise HTTPException(status_code=404, detail="File not found")
 
             signed_url = response.get("signedURL") or response.get("signed_url")
             if not signed_url:
-                raise HTTPException(status_code=500, detail="No signed URL in response")
+                raise HTTPException(status_code=404, detail="File not found")
 
             # Append download parameter if needed
             if download:
@@ -90,6 +90,11 @@ async def get_signed_url(
         except HTTPException:
             raise
         except Exception as e:
+            logger.debug(f"Error generating signed URL for {bucket}/{path}: {e}")
+            # Check if it's a 404 error (file not found)
+            error_str = str(e).lower()
+            if "not_found" in error_str or "404" in error_str or "object not found" in error_str:
+                raise HTTPException(status_code=404, detail="File not found")
             logger.error(f"Error generating signed URL for {bucket}/{path}: {e}")
             raise HTTPException(status_code=500, detail="Failed to generate signed URL")
 

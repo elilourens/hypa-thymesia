@@ -197,6 +197,34 @@ export function useDocuments() {
     }
   }
 
+  /**
+   * Get signed URL for image thumbnail
+   */
+  async function getThumbnailUrl(docId: string): Promise<string | null> {
+    try {
+      const headers = await authHeaders()
+      const thumbnailPath = `thumbnails/${docId}.jpg`
+
+      const res = await $fetch<{ signed_url: string }>(
+        `${API_BASE}/storage/signed-url`,
+        {
+          method: 'GET',
+          headers,
+          params: {
+            bucket: 'videos',
+            path: thumbnailPath,
+            download: 'false',
+          },
+        }
+      )
+      return res.signed_url
+    } catch (err: any) {
+      // Thumbnail doesn't exist or error occurred
+      console.debug('Thumbnail not available:', err)
+      return null
+    }
+  }
+
   return {
     uploadDocument,
     listDocuments,
@@ -205,5 +233,6 @@ export function useDocuments() {
     pollDocumentStatus,
     updateDocumentGroup,
     deleteDocument,
+    getThumbnailUrl,
   }
 }
