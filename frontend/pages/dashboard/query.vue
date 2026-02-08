@@ -515,7 +515,7 @@ async function copyAllChunks() {
   </BodyCard>
 
   <!-- Results Section -->
-  <BodyCard>
+  <BodyCard class="glass-bg">
     <div class="py-8">
       <!-- Mode 1: Files Search -->
       <div v-if="searchMode === 'files'" class="space-y-8">

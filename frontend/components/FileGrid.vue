@@ -113,7 +113,7 @@ onUnmounted(() => {
     <!-- File Grid -->
     <div
       v-if="!loading && files.length > 0"
-      class="grid gap-1"
+      class="grid gap-3"
       style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))"
     >
       <UPopover
@@ -125,39 +125,48 @@ onUnmounted(() => {
         :close-delay="200"
         arrow
       >
-        <UCard
-          as="button"
-          class="flex flex-col cursor-pointer border border-transparent hover:border-primary-500 hover:shadow-md transition-all text-left w-full gap-0 bg-transparent"
-          :ui="{ body: 'p-0' }"
+        <button
+          class="glass-card group flex flex-col cursor-pointer text-left w-full gap-0 rounded-xl p-3 transition-all duration-300"
           @click="emit('open-file', file)"
           @contextmenu="onContextMenu($event, file)"
         >
           <!-- File Thumbnail or Icon -->
-          <div class="flex justify-center items-center" style="height: 120px">
+          <div class="flex justify-center items-center rounded-lg overflow-hidden" style="height: 120px">
             <!-- Show thumbnail for images and videos if available -->
-            <img
+            <div
               v-if="(file.mime_type?.startsWith('image/') || file.mime_type?.startsWith('video/')) && thumbnailUrls[file.id]"
-              :src="thumbnailUrls[file.id]"
-              :alt="file.filename"
-              class="w-full h-full object-cover rounded"
-              @error="() => delete thumbnailUrls[file.id]"
-            />
+              class="relative w-full h-full"
+            >
+              <img
+                :src="thumbnailUrls[file.id]"
+                :alt="file.filename"
+                class="w-full h-full object-cover"
+                @error="() => delete thumbnailUrls[file.id]"
+              />
+              <!-- Play Button Overlay for videos -->
+              <div
+                v-if="file.mime_type?.startsWith('video/')"
+                class="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition-all rounded-lg"
+              >
+                <UIcon name="i-heroicons-play-solid" class="w-10 h-10 text-white/80 drop-shadow-lg" />
+              </div>
+            </div>
             <!-- Fallback to icon -->
             <UIcon
               v-else
               :name="getFileIcon(file.mime_type)"
-              class="w-12 h-12 text-primary-500"
+              class="w-12 h-12 text-white/60 group-hover:text-white/80 transition-colors duration-300"
             />
           </div>
 
           <!-- Filename -->
           <h3
-            class="font-medium text-[11px] text-foreground leading-tight whitespace-normal mt-1"
+            class="font-medium text-[11px] text-white/80 group-hover:text-white leading-tight whitespace-normal mt-2 transition-colors duration-300"
             :title="file.filename"
           >
             {{ file.filename }}
           </h3>
-        </UCard>
+        </button>
 
         <!-- Hover Preview Content -->
         <template v-if="enableHoverPreview && chunkMap?.has(file.id)" #content>
@@ -176,7 +185,7 @@ onUnmounted(() => {
 
     <!-- Loading State -->
     <div v-if="loading" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))">
-      <div v-for="i in 6" :key="i" class="h-24 bg-gray-200 dark:bg-gray-800 rounded-lg animate-pulse" />
+      <div v-for="i in 6" :key="i" class="h-24 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
     </div>
 
     <!-- Empty State -->
@@ -210,3 +219,31 @@ onUnmounted(() => {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.glass-card {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-top-color: rgba(255, 255, 255, 0.2);
+  border-left-color: rgba(255, 255, 255, 0.15);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.03);
+}
+
+.glass-card:hover {
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.3);
+  border-left-color: rgba(255, 255, 255, 0.25);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 24px rgba(168, 85, 247, 0.08),
+    inset 0 1px 1px rgba(255, 255, 255, 0.15),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.05);
+  transform: translateY(-2px);
+}
+</style>
