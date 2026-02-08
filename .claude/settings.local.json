@@ -2,7 +2,8 @@
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "nuxt-ui-remote",
-    "supabase"
+    "supabase",
+    "playwright"
   ],
   "permissions": {
     "allow": [

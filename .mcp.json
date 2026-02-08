@@ -5,9 +5,12 @@
       "url": "https://ui.nuxt.com/mcp"
     },
     "supabase": {
-          "type": "http",
-          "url": "https://mcp.supabase.com/mcp?project_ref=yfovsxfzlkzvfojukzdv"
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=yfovsxfzlkzvfojukzdv"
+    },
+    "playwright": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@playwright/mcp@latest"]
     }
-    
   }
 }
