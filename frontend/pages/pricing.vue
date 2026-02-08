@@ -38,6 +38,7 @@
               <div class="flex items-center ">
                 <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
                 <span class="text-sm">200 total pages</span>
+                <UButton icon="i-heroicons-question-mark-circle" variant="ghost" size="xs" :padded="false" @click="showConversions = true" class="ml-1" />
               </div>
               <div class="flex items-center ">
                 <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
@@ -87,6 +88,7 @@
               <div class="flex items-center ">
                 <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
                 <span class="text-sm">2,000 total pages</span>
+                <UButton icon="i-heroicons-question-mark-circle" variant="ghost" size="xs" :padded="false" @click="showConversions = true" class="ml-1" />
               </div>
               <div class="flex items-center ">
                 <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
@@ -137,6 +139,7 @@
               <div class="flex items-center ">
                 <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
                 <span class="text-sm">10,000 total pages</span>
+                <UButton icon="i-heroicons-question-mark-circle" variant="ghost" size="xs" :padded="false" @click="showConversions = true" class="ml-1" />
               </div>
               <div class="flex items-center ">
                 <UIcon name="i-heroicons-check-circle-20-solid" class="w-5 h-5 text-white mr-3 flex-shrink-0" />
@@ -273,6 +276,27 @@
         </div>
       </div>
 
+      <!-- Conversion Rates Modal -->
+      <UModal v-model:open="showConversions" title="Storage Conversion Rates">
+        <template #body>
+          <div class="space-y-4 text-zinc-300">
+            <div class="border-l-2 border-primary-500 pl-4">
+              <p class="font-medium text-white mb-1">Document Pages</p>
+              <p class="text-sm">1 page in a text document = 1 page of storage</p>
+            </div>
+            <div class="border-l-2 border-primary-500 pl-4">
+              <p class="font-medium text-white mb-1">Images</p>
+              <p class="text-sm">1 image = 1 page of storage</p>
+            </div>
+            <div class="border-l-2 border-primary-500 pl-4">
+              <p class="font-medium text-white mb-1">Videos</p>
+              <p class="text-sm">100 MB of video = 5 pages of storage</p>
+              <p class="text-xs text-zinc-400 mt-1">(Minimum 1 page per video)</p>
+            </div>
+          </div>
+        </template>
+      </UModal>
+
       <!-- Error Message -->
       <div v-if="error" class="mt-8 max-w-2xl mx-auto">
         <UAlert
@@ -295,6 +319,7 @@ const client = useSupabaseClient()
 const { createCheckoutSession, getSubscriptionStatus, loading, error } = useStripe()
 
 const userTier = ref<'free' | 'pro' | 'max' | null>(null)
+const showConversions = ref(false)
 
 onMounted(async () => {
   try {
