@@ -17,12 +17,13 @@ const emit = defineEmits<{
 const { groups, loading, fetchGroups } = useGroupsCache()
 
 const options = computed(() => {
-  const base: { label: string; value: string | null }[] = []
+  const base: { label: string; value: string | null; color?: string }[] = []
   if (props.includeAll) base.push({ label: 'All groups', value: null })
   if (props.includeNoGroup) base.push({ label: 'No Group', value: NO_GROUP_VALUE })
   return base.concat(groups.value.map(g => ({
     label: g.name ?? '(unnamed)',
-    value: g.id
+    value: g.id,
+    color: g.color
   })))
 })
 
@@ -41,6 +42,16 @@ onMounted(() => fetchGroups())
     icon="i-lucide-users"
     class="w-72"
   >
+    <template #item="{ item }">
+      <div class="flex items-center gap-2 w-full">
+        <div
+          v-if="item.color"
+          class="w-3 h-3 rounded-full flex-shrink-0"
+          :style="{ backgroundColor: item.color }"
+        />
+        <span class="truncate">{{ item.label }}</span>
+      </div>
+    </template>
     <template #empty>
       <span class="text-muted">No groups found</span>
     </template>

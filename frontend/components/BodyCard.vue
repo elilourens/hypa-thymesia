@@ -3,7 +3,10 @@
 </script>
 
 <template>
-  <UCard variant="subtle" class="m-10 p-2 2xl:max-w-7xl 2xl:mx-auto">
+  <UCard
+    variant="subtle"
+    class="m-10 p-2 2xl:max-w-7xl 2xl:mx-auto shadow-lg hover:shadow-xl transition-shadow duration-200"
+  >
     <slot />
   </UCard>
 </template>

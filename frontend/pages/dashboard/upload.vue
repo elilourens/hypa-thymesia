@@ -2,16 +2,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useToast } from '#ui/composables/useToast'
 import { useDocumentUploadNotifications } from '@/composables/useDocumentUploadNotifications'
-import { useGroupsApi } from '@/composables/useGroupsApi'
-import { useGroupsCache } from '@/composables/useGroupsCache'
 import { useQuota } from '@/composables/useQuota'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
 import UsageDisplay from '@/components/UsageDisplay.vue'
 
 const { uploadMultipleAndNotify } = useDocumentUploadNotifications()
-const { createGroup } = useGroupsApi()
-const { invalidateCache } = useGroupsCache()
 const { getQuota } = useQuota()
 const toast = useToast()
 
@@ -36,10 +32,9 @@ const quotaInfo = ref<{
 } | null>(null)
 
 
-// Group mode: none, pick existing, or create new
-const groupMode = ref<'none' | 'existing' | 'create'>('none')
+// Group mode: none or pick existing
+const groupMode = ref<'none' | 'existing'>('none')
 const selectedGroupId = ref<string | null>(null)
-const newGroupName = ref('')
 
 // Note: Tagging is handled automatically by Ragie's entity extraction
 
@@ -59,7 +54,6 @@ onMounted(async () => {
 // Enable upload only when conditions are met
 const canUpload = computed(() => {
   if (!files.value.length || uploading.value) return false
-  if (groupMode.value === 'create') return !!newGroupName.value.trim()
   if (groupMode.value === 'existing') return !!selectedGroupId.value
   // Check if user has reached quota limit
   if (quotaInfo.value && !quotaInfo.value.can_upload) return false
@@ -68,26 +62,6 @@ const canUpload = computed(() => {
 
 /** Resolve group by explicit mode */
 async function resolveGroupId(): Promise<string | undefined> {
-  if (groupMode.value === 'create') {
-    const name = newGroupName.value.trim()
-    if (!name) return undefined
-    try {
-      const g = await createGroup(name)
-      selectedGroupId.value = g.group_id
-      newGroupName.value = ''
-      invalidateCache() // Force refresh groups cache
-      return g.group_id
-    } catch (e: any) {
-      toast.add({
-        title: 'Failed to create group',
-        description: e?.message,
-        color: 'error',
-        icon: 'i-lucide-alert-circle'
-      })
-      return undefined
-    }
-  }
-
   if (groupMode.value === 'existing') {
     return selectedGroupId.value || undefined
   }
@@ -189,28 +163,11 @@ async function doUpload(): Promise<void> {
               @click="groupMode = 'existing'"
               aria-pressed="groupMode === 'existing'"
             >Choose existing</UButton>
-            <UButton
-              :variant="groupMode === 'create' ? 'subtle' : 'ghost'"
-              @click="groupMode = 'create'"
-              aria-pressed="groupMode === 'create'"
-            >Create new</UButton>
           </div>
 
           <!-- Existing: use GroupSelect -->
           <div v-if="groupMode === 'existing'" class="flex items-center gap-2">
             <GroupSelect v-model="selectedGroupId" placeholder="Select a group…" />
-          </div>
-
-          <!-- Create: show input and button -->
-          <div v-else-if="groupMode === 'create'" class="flex items-center gap-2">
-            <UInput v-model="newGroupName" placeholder="New group name…" class="w-72" />
-            <UButton
-              :disabled="!newGroupName.trim() || uploading"
-              @click="async () => { await resolveGroupId() }"
-              variant="soft"
-            >
-              Create
-            </UButton>
           </div>
 
           <!-- None: hint -->

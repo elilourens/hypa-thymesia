@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useSearch } from '@/composables/useSearch'
 import { useDocuments, type DocumentItem } from '@/composables/useDocuments'
 import { useGroupsCache } from '@/composables/useGroupsCache'
 import { NO_GROUP_VALUE } from '@/composables/useGroups'
+import { useDocumentUploadNotifications } from '@/composables/useDocumentUploadNotifications'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
 import ResultList from '@/components/ResultList.vue'
@@ -16,6 +17,7 @@ const { search } = useSearch()
 const { listDocuments, getDocument, deleteDocument, updateDocumentGroup } = useDocuments()
 const { groups: cachedGroups } = useGroupsCache()
 const { getSignedUrl, getVideoInfo } = useFilesApi()
+const { onUploadComplete } = useDocumentUploadNotifications()
 const toast = useToast()
 
 // ========== Dual Search State ==========
@@ -251,10 +253,40 @@ async function loadMoreFiles() {
 const debouncedSearchFiles = useDebounceFn(searchFilesOnly, 150) // Fast filename search
 const debouncedSearchSemantic = useDebounceFn(searchSemantic, 500) // Delayed semantic search
 
+// ========== Auto-Refresh on Upload Complete ==========
+
+/**
+ * Refresh results when a file finishes processing
+ */
+function refreshAfterUpload(fileId: string, filename: string, success: boolean) {
+  if (!success) return // Only refresh on successful uploads
+
+  // If user is searching, re-run search to include new file
+  if (queryTextInput.value.trim()) {
+    searchFilesOnly()
+    searchSemantic()
+  } else {
+    // Otherwise reload default file list
+    loadDefaultFiles()
+  }
+}
+
 // ========== Lifecycle & Watchers ==========
+
+let unsubscribeUploadComplete: (() => void) | null = null
 
 onMounted(() => {
   loadDefaultFiles()
+
+  // Listen for upload completion events
+  unsubscribeUploadComplete = onUploadComplete(refreshAfterUpload)
+})
+
+onBeforeUnmount(() => {
+  // Clean up event listener
+  if (unsubscribeUploadComplete) {
+    unsubscribeUploadComplete()
+  }
 })
 
 watch(selectedGroup, () => {
@@ -495,7 +527,7 @@ async function confirmBulkDelete() {
             placeholder="Filter by file type…"
             icon="i-lucide-file"
             clearable
-            class="w-full"
+            class="w-64"
           />
         </div>
       </div>

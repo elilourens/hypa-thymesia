@@ -15,7 +15,12 @@ interface UploadInProgress {
   type: 'document' | 'video'
 }
 
+// Global state
 const uploadsInProgress = ref<Map<string, UploadInProgress>>(new Map())
+
+// Simple event emitter for upload completion
+type UploadCompleteCallback = (fileId: string, filename: string, success: boolean) => void
+const uploadCompleteCallbacks = new Set<UploadCompleteCallback>()
 
 export function useDocumentUploadNotifications() {
   const toast = useToast()
@@ -80,6 +85,8 @@ export function useDocumentUploadNotifications() {
    * Poll file status and show notification when ready/failed
    */
   async function pollAndNotify(fileId: string, filename: string, toastId: string, fileType: 'document' | 'video') {
+    let success = false
+
     try {
       const finalStatus = fileType === 'video'
         ? await pollVideoStatus(fileId, undefined, 300, 2000)
@@ -97,6 +104,7 @@ export function useDocumentUploadNotifications() {
           color: 'success',
           icon: 'i-lucide-check-circle',
         })
+        success = true
       } else if (finalStatusValue === 'failed') {
         toast.add({
           id: toastId,
@@ -119,6 +127,15 @@ export function useDocumentUploadNotifications() {
 
       uploadsInProgress.value.delete(fileId)
     }
+
+    // Notify all listeners that upload completed
+    uploadCompleteCallbacks.forEach(callback => {
+      try {
+        callback(fileId, filename, success)
+      } catch (e) {
+        console.error('Error in upload complete callback:', e)
+      }
+    })
   }
 
   /**
@@ -130,9 +147,21 @@ export function useDocumentUploadNotifications() {
     return results.filter((id): id is string => id !== null)
   }
 
+  /**
+   * Register a callback to be called when any upload completes
+   * Returns an unsubscribe function
+   */
+  function onUploadComplete(callback: UploadCompleteCallback): () => void {
+    uploadCompleteCallbacks.add(callback)
+    return () => {
+      uploadCompleteCallbacks.delete(callback)
+    }
+  }
+
   return {
     uploadAndNotify,
     uploadMultipleAndNotify,
     uploadsInProgress: readonly(uploadsInProgress),
+    onUploadComplete,
   }
 }
