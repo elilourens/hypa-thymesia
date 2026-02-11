@@ -2,10 +2,12 @@
 import { ref, reactive, onMounted, h, resolveComponent, computed } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useGroupsApi, type Group } from '@/composables/useGroups'
+import { useGroupsCache } from '@/composables/useGroupsCache'
 import BodyCard from '@/components/BodyCard.vue'
 import ColorPicker from '@/components/ColorPicker.vue'
 
 const { listGroups, createGroup, deleteGroup, renameGroup } = useGroupsApi()
+const { invalidateCache } = useGroupsCache()
 
 const UButton = resolveComponent('UButton')
 const UInput = resolveComponent('UInput')
@@ -64,6 +66,7 @@ async function onCreate() {
     newName.value = ''
     newColor.value = '#8B5CF6'
     pagination.pageIndex = 0
+    invalidateCache() // Force refresh groups cache
     await refresh()
     toast.add({ title: 'Group created', color: 'success', icon: 'i-lucide-check' })
   } catch (e: any) {
@@ -96,6 +99,7 @@ async function onSaveEdit() {
   isUpdating.value = true
   try {
     await renameGroup(editingId.value, name, editColor.value)
+    invalidateCache() // Force refresh groups cache
     await refresh()
     closeEditModal()
     toast.add({ title: 'Group updated', color: 'success', icon: 'i-lucide-check' })
@@ -111,6 +115,7 @@ async function onDelete(id: string) {
   deletingIds.value.add(id)
   try {
     await deleteGroup(id)
+    invalidateCache() // Force refresh groups cache
     groups.value = groups.value.filter(g => g.id !== id)
     total.value = Math.max(0, total.value - 1)
 

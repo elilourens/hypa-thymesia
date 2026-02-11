@@ -3,7 +3,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useSearch } from '@/composables/useSearch'
 import { useDocuments, type DocumentItem } from '@/composables/useDocuments'
-import { useGroupsApi, NO_GROUP_VALUE } from '@/composables/useGroups'
+import { useGroupsCache } from '@/composables/useGroupsCache'
+import { NO_GROUP_VALUE } from '@/composables/useGroups'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
 import ResultList from '@/components/ResultList.vue'
@@ -13,7 +14,7 @@ import { useFilesApi } from '@/composables/useFiles'
 
 const { search } = useSearch()
 const { listDocuments, getDocument, deleteDocument, updateDocumentGroup } = useDocuments()
-const { listGroups } = useGroupsApi()
+const { groups: cachedGroups } = useGroupsCache()
 const { getSignedUrl, getVideoInfo } = useFilesApi()
 const toast = useToast()
 
@@ -57,8 +58,10 @@ const filesPage = ref(1)
 const filesHasMore = ref(false)
 const filesTotal = ref(0)
 
-// Group colors state
-const groupColors = ref<Record<string, string>>({})
+// Group colors state (computed from cached groups)
+const groupColors = computed(() =>
+  Object.fromEntries(cachedGroups.value.map(g => [g.id, g.color]))
+)
 
 // ========== Computed: Filtered Results ==========
 const filteredFilenameMatches = computed(() => {
@@ -84,17 +87,6 @@ const filteredChunks = computed(() => {
 })
 
 // ========== Dual Search & File Loading ==========
-
-async function loadGroupColors() {
-  try {
-    const groups = await listGroups()
-    groupColors.value = Object.fromEntries(
-      groups.map(g => [g.id, g.color])
-    )
-  } catch (e: any) {
-    console.error('Failed to load group colors:', e)
-  }
-}
 
 async function loadDefaultFiles() {
   loading.value = true
@@ -263,7 +255,6 @@ const debouncedSearchSemantic = useDebounceFn(searchSemantic, 500) // Delayed se
 
 onMounted(() => {
   loadDefaultFiles()
-  loadGroupColors()
 })
 
 watch(selectedGroup, () => {

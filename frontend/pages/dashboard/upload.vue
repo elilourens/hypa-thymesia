@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useToast } from '#ui/composables/useToast'
 import { useDocumentUploadNotifications } from '@/composables/useDocumentUploadNotifications'
 import { useGroupsApi } from '@/composables/useGroupsApi'
+import { useGroupsCache } from '@/composables/useGroupsCache'
 import { useQuota } from '@/composables/useQuota'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
@@ -10,6 +11,7 @@ import UsageDisplay from '@/components/UsageDisplay.vue'
 
 const { uploadMultipleAndNotify } = useDocumentUploadNotifications()
 const { createGroup } = useGroupsApi()
+const { invalidateCache } = useGroupsCache()
 const { getQuota } = useQuota()
 const toast = useToast()
 
@@ -73,6 +75,7 @@ async function resolveGroupId(): Promise<string | undefined> {
       const g = await createGroup(name)
       selectedGroupId.value = g.group_id
       newGroupName.value = ''
+      invalidateCache() // Force refresh groups cache
       return g.group_id
     } catch (e: any) {
       toast.add({
