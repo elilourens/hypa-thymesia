@@ -29,6 +29,7 @@ async def list_groups(
                 name=group["name"],
                 created_at=group["created_at"],
                 sort_index=group.get("sort_index"),
+                color=group.get("color", "#8B5CF6"),
             )
             for group in (response.data or [])
         ]
@@ -49,7 +50,8 @@ async def create_group(
         response = supabase.table("app_groups").insert({
             "user_id": current_user.id,
             "name": request.name,
-            "sort_index": request.sort_index or 0
+            "sort_index": request.sort_index or 0,
+            "color": request.color or "#8B5CF6"
         }).execute()
 
         if not response.data:
@@ -61,6 +63,7 @@ async def create_group(
             name=group["name"],
             created_at=group["created_at"],
             sort_index=group.get("sort_index"),
+            color=group.get("color", "#8B5CF6"),
         )
 
     except HTTPException:
@@ -91,6 +94,8 @@ async def rename_group(
         update_data = {"name": request.name}
         if request.sort_index is not None:
             update_data["sort_index"] = request.sort_index
+        if hasattr(request, 'color') and request.color is not None:
+            update_data["color"] = request.color
 
         response = supabase.table("app_groups").update(
             update_data
@@ -105,6 +110,7 @@ async def rename_group(
             name=group["name"],
             created_at=group["created_at"],
             sort_index=group.get("sort_index"),
+            color=group.get("color", "#8B5CF6"),
         )
 
     except HTTPException:

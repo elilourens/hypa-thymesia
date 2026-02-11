@@ -16,6 +16,7 @@ interface Props {
   contextMenuItems?: ContextMenuItem[]
   enableSelection?: boolean
   selectedIds?: string[]
+  groupColors?: Record<string, string>
 }
 
 const props = defineProps<Props>()
@@ -101,6 +102,35 @@ function getFileIcon(mimeType?: string): string {
   return 'i-lucide-file'
 }
 
+// Format date to localized readable format
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(d)
+}
+
+// Format file size to human-readable format
+function formatSize(bytes?: number | null): string {
+  if (!bytes) return '—'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0, v = bytes
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
+}
+
+// Format chunks and pages info
+function formatChunksPages(file: DocumentItem): string | null {
+  const parts: string[] = []
+  if (file.chunk_count) parts.push(`${file.chunk_count} chunks`)
+  if (file.page_count) parts.push(`${file.page_count} pages`)
+  return parts.length > 0 ? parts.join(' • ') : null
+}
+
 const emit = defineEmits<{
   'open-file': [file: DocumentItem]
   'update:selectedIds': [ids: string[]]
@@ -181,10 +211,10 @@ onUnmounted(() => {
       <UPopover
         v-for="file in files"
         :key="file.id"
-        :disabled="!enableHoverPreview || !chunkMap?.has(file.id)"
+        :disabled="!enableHoverPreview && !file.filename"
         mode="hover"
-        :open-delay="500"
-        :close-delay="200"
+        :open-delay="300"
+        :close-delay="150"
         arrow
       >
         <button
@@ -205,6 +235,14 @@ onUnmounted(() => {
               class="pointer-events-auto"
             />
           </div>
+
+          <!-- Group Color Dot (top-right corner) -->
+          <div
+            v-if="file.group_id && groupColors?.[file.group_id]"
+            class="absolute top-2 right-2 z-10 w-3 h-3 rounded-full shadow-md"
+            :style="{ backgroundColor: groupColors[file.group_id] }"
+            :title="file.group_name || 'Unnamed group'"
+          />
 
           <!-- File Thumbnail or Icon -->
           <div class="flex justify-center items-center rounded-lg overflow-hidden" style="height: 84px">
@@ -245,8 +283,9 @@ onUnmounted(() => {
         </button>
 
         <!-- Hover Preview Content -->
-        <template v-if="enableHoverPreview && chunkMap?.has(file.id)" #content>
-          <Teleport to="body">
+        <template #content>
+          <!-- Chunk Preview (if available) -->
+          <Teleport v-if="enableHoverPreview && chunkMap?.has(file.id)" to="body">
             <div class="fixed inset-0 bg-black/50 z-40" />
             <div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] max-w-[90vw] max-h-[70vh] overflow-y-auto p-6 rounded-lg shadow-2xl border border-foreground/10 z-50 backdrop-blur-md bg-black/20" style="background: rgba(0, 0, 0, 0.1); backdrop-filter: blur(10px);">
               <p class="text-sm text-foreground/70 font-semibold mb-4 sticky top-0">Most relevant content:</p>
@@ -255,6 +294,48 @@ onUnmounted(() => {
               </p>
             </div>
           </Teleport>
+
+          <!-- Metadata (fallback when no chunk preview) -->
+          <div v-if="!enableHoverPreview || !chunkMap?.has(file.id)" class="w-[280px] p-3 space-y-2 bg-neutral-900/95 backdrop-blur-md rounded-lg border border-foreground/20 shadow-xl" @click.stop>
+            <!-- Filename -->
+            <div class="font-semibold text-white text-sm whitespace-normal break-words">
+              {{ file.filename }}
+            </div>
+
+            <div class="border-t border-foreground/10 pt-2 space-y-2 text-sm text-foreground/80">
+              <!-- Date Added -->
+              <div class="flex items-center gap-2">
+                <UIcon name="i-lucide-calendar" class="w-4 h-4 flex-shrink-0" />
+                <span>{{ formatDate(file.created_at) }}</span>
+              </div>
+
+              <!-- File Size -->
+              <div class="flex items-center gap-2">
+                <UIcon name="i-lucide-hard-drive" class="w-4 h-4 flex-shrink-0" />
+                <span>{{ formatSize(file.file_size_bytes) }}</span>
+              </div>
+
+              <!-- Group -->
+              <div class="flex items-center gap-2">
+                <UIcon name="i-lucide-folder" class="w-4 h-4 flex-shrink-0" />
+                <div v-if="file.group_name" class="flex items-center gap-2">
+                  <div
+                    v-if="file.group_id && groupColors?.[file.group_id]"
+                    class="w-2 h-2 rounded-full flex-shrink-0"
+                    :style="{ backgroundColor: groupColors[file.group_id] }"
+                  />
+                  <span>{{ file.group_name }}</span>
+                </div>
+                <span v-else class="text-foreground/50 italic">No group</span>
+              </div>
+
+              <!-- Chunks & Pages (if available) -->
+              <div v-if="formatChunksPages(file)" class="flex items-center gap-2">
+                <UIcon name="i-lucide-file-text" class="w-4 h-4 flex-shrink-0" />
+                <span>{{ formatChunksPages(file) }}</span>
+              </div>
+            </div>
+          </div>
         </template>
       </UPopover>
     </div>

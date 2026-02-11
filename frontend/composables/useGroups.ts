@@ -4,6 +4,7 @@ export interface Group {
   name: string
   created_at: string
   sort_index?: number | null
+  color: string
 }
 
 // Possible API shapes (we normalize them)
@@ -20,6 +21,7 @@ function normalizeGroup(g: ApiGroup): Group {
     name: (g as any).name ?? (g as any).group_name ?? '(unnamed)',
     created_at: (g as any).created_at ?? new Date().toISOString(),
     sort_index: (g as any).sort_index ?? null,
+    color: (g as any).color ?? '#8B5CF6',
   }
 }
 
@@ -58,23 +60,25 @@ export function useGroupsApi() {
   }
 
   /** ---------------- Create ---------------- */
-  async function createGroup(name: string, sort_index = 0): Promise<Group> {
+  async function createGroup(name: string, sort_index = 0, color = '#8B5CF6'): Promise<Group> {
     const headers = await authHeaders()
     const res = await $fetch<any>(`${API_BASE}/groups`, {
       method: 'POST',
       headers,
-      body: { name, sort_index }, // matches GroupIn
+      body: { name, sort_index, color }, // matches GroupIn
     })
     return normalizeGroup(res)
   }
 
-  /** ---------------- Update (rename) ---------------- */
-  async function renameGroup(id: string, name: string): Promise<Group> {
+  /** ---------------- Update (rename/update color) ---------------- */
+  async function renameGroup(id: string, name: string, color?: string): Promise<Group> {
     const headers = await authHeaders()
+    const body: any = { name }
+    if (color) body.color = color
     const res = await $fetch<any>(`${API_BASE}/groups/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers,
-      body: { name }, // matches GroupRename
+      body,
     })
     return normalizeGroup(res)
   }

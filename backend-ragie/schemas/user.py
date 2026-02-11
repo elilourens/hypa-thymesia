@@ -2,7 +2,7 @@
 
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserSettings(BaseModel):
@@ -34,14 +34,16 @@ class UserQuotaStatus(BaseModel):
 class GroupCreate(BaseModel):
     """Create group request."""
 
-    name: str
+    name: str = Field(..., max_length=30)
     sort_index: Optional[int] = None
+    color: str = '#8B5CF6'
 
 
 class GroupResponse(BaseModel):
     """Group response."""
 
     id: str
-    name: str
+    name: str = Field(..., max_length=30)
     created_at: datetime
     sort_index: Optional[int] = None
+    color: str
