@@ -197,17 +197,17 @@ const columns: TableColumn<Group>[] = [
   <BodyCard>
     <div class="w-full mx-auto">
       <div class="flex items-center justify-between px-4 py-4">
-        <h1 class="text-lg font-semibold">Groups</h1>
+        <h1 class="text-lg font-semibold">Create New Group</h1>
         <div class="text-sm text-muted">
           Total: {{ total.toLocaleString() }}
         </div>
       </div>
 
       <!-- Create -->
-      <div class="px-4 pb-6 border-b border-accented">
+      <div class="px-4 pb-6">
         <div class="flex flex-col gap-4">
           <div class="flex flex-wrap items-end gap-2">
-            <div class="flex-1 min-w-64">
+            <div class="w-64">
               <label class="text-xs font-medium text-foreground/70 block mb-1">Group name</label>
               <UInput
                 v-model="newName"
@@ -231,7 +231,14 @@ const columns: TableColumn<Group>[] = [
         </div>
       </div>
 
+      <!-- Divider -->
+      <div class="border-t border-accented my-4"></div>
+
       <!-- List -->
+      <div class="px-4 pb-3">
+        <h2 class="text-base font-semibold">Existing Groups</h2>
+      </div>
+
       <UTable
         :data="groups"
         :columns="columns"
