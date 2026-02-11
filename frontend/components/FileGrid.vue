@@ -14,6 +14,8 @@ interface Props {
   enableHoverPreview?: boolean
   chunkMap?: Map<string, any>
   contextMenuItems?: ContextMenuItem[]
+  enableSelection?: boolean
+  selectedIds?: string[]
 }
 
 const props = defineProps<Props>()
@@ -37,6 +39,53 @@ watch(() => props.files, async (newFiles) => {
   }
 }, { immediate: true })
 
+// Selection state
+const localSelectedIds = ref<Set<string>>(new Set())
+
+// Sync with prop (v-model support)
+watch(() => props.selectedIds, (newIds) => {
+  if (newIds) {
+    localSelectedIds.value = new Set(newIds)
+  }
+}, { immediate: true })
+
+// Computed helpers
+const allSelected = computed(() => {
+  if (props.files.length === 0) return false
+  return props.files.every(f => localSelectedIds.value.has(f.id))
+})
+
+const someSelected = computed(() => {
+  return localSelectedIds.value.size > 0 && !allSelected.value
+})
+
+// Selection handlers
+function toggleSelection(fileId: string, event: Event) {
+  event.stopPropagation() // Prevent opening file
+
+  if (localSelectedIds.value.has(fileId)) {
+    localSelectedIds.value.delete(fileId)
+  } else {
+    localSelectedIds.value.add(fileId)
+  }
+
+  emit('update:selectedIds', Array.from(localSelectedIds.value))
+}
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    localSelectedIds.value.clear()
+  } else {
+    localSelectedIds.value = new Set(props.files.map(f => f.id))
+  }
+
+  emit('update:selectedIds', Array.from(localSelectedIds.value))
+}
+
+function isSelected(fileId: string): boolean {
+  return localSelectedIds.value.has(fileId)
+}
+
 // Helper function to get appropriate icon based on mime type
 function getFileIcon(mimeType?: string): string {
   if (!mimeType) return 'i-lucide-file'
@@ -54,6 +103,7 @@ function getFileIcon(mimeType?: string): string {
 
 const emit = defineEmits<{
   'open-file': [file: DocumentItem]
+  'update:selectedIds': [ids: string[]]
 }>()
 
 // Context menu state
@@ -110,11 +160,23 @@ onUnmounted(() => {
 
 <template>
   <div>
+    <!-- Select All Header (only shown when enableSelection is true) -->
+    <div v-if="enableSelection && files.length > 0" class="flex items-center gap-2 mb-3 px-2">
+      <UCheckbox
+        :model-value="someSelected ? 'indeterminate' : allSelected"
+        @update:model-value="toggleSelectAll"
+        aria-label="Select all files"
+      />
+      <span class="text-sm text-foreground/60">
+        {{ localSelectedIds.size > 0 ? `${localSelectedIds.size} selected` : 'Select all' }}
+      </span>
+    </div>
+
     <!-- File Grid -->
     <div
       v-if="!loading && files.length > 0"
       class="grid gap-3"
-      style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))"
+      style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))"
     >
       <UPopover
         v-for="file in files"
@@ -126,12 +188,26 @@ onUnmounted(() => {
         arrow
       >
         <button
-          class="glass-card group flex flex-col cursor-pointer text-left w-full gap-0 rounded-xl p-3 transition-all duration-300"
+          class="glass-card group flex flex-col cursor-pointer text-left w-full gap-0 rounded-xl p-3 transition-all duration-300 relative"
+          :class="{ 'ring-2 ring-purple-500': enableSelection && isSelected(file.id) }"
           @click="emit('open-file', file)"
           @contextmenu="onContextMenu($event, file)"
         >
+          <!-- Checkbox overlay (top-left corner) -->
+          <div
+            v-if="enableSelection"
+            class="absolute top-2 left-2 z-10"
+            @click.stop="toggleSelection(file.id, $event)"
+          >
+            <UCheckbox
+              :model-value="isSelected(file.id)"
+              aria-label="Select file"
+              class="pointer-events-auto"
+            />
+          </div>
+
           <!-- File Thumbnail or Icon -->
-          <div class="flex justify-center items-center rounded-lg overflow-hidden" style="height: 120px">
+          <div class="flex justify-center items-center rounded-lg overflow-hidden" style="height: 84px">
             <!-- Show thumbnail for images and videos if available -->
             <div
               v-if="(file.mime_type?.startsWith('image/') || file.mime_type?.startsWith('video/')) && thumbnailUrls[file.id]"
@@ -184,8 +260,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Loading State -->
-    <div v-if="loading" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr))">
-      <div v-for="i in 6" :key="i" class="h-24 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
+    <div v-if="loading" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))">
+      <div v-for="i in 6" :key="i" class="h-16 bg-neutral-200 dark:bg-neutral-800 rounded-lg animate-pulse" />
     </div>
 
     <!-- Empty State -->
@@ -245,5 +321,9 @@ onUnmounted(() => {
     inset 0 1px 1px rgba(255, 255, 255, 0.15),
     inset 0 -1px 1px rgba(255, 255, 255, 0.05);
   transform: translateY(-2px);
+}
+
+.glass-card.ring-2 {
+  border-color: rgba(168, 85, 247, 0.5);
 }
 </style>

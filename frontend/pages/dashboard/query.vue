@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useSearch } from '@/composables/useSearch'
 import { useDocuments, type DocumentItem } from '@/composables/useDocuments'
+import { NO_GROUP_VALUE } from '@/composables/useGroups'
 import GroupSelect from '@/components/GroupSelect.vue'
 import BodyCard from '@/components/BodyCard.vue'
 import ResultList from '@/components/ResultList.vue'
@@ -11,7 +12,7 @@ import { useFilesApi } from '@/composables/useFiles'
 
 
 const { search } = useSearch()
-const { listDocuments, getDocument, deleteDocument } = useDocuments()
+const { listDocuments, getDocument, deleteDocument, updateDocumentGroup } = useDocuments()
 const { getSignedUrl, getVideoInfo } = useFilesApi()
 const toast = useToast()
 
@@ -28,6 +29,13 @@ const filenameMatches = ref<DocumentItem[]>([])
 const semanticMatches = ref<DocumentItem[]>([])
 const results = ref<any[]>([]) // Semantic chunks
 const chunkMap = ref<Map<string, any>>(new Map())
+
+// ========== Bulk Selection State ==========
+const selectedFileIds = ref<string[]>([])
+
+// ========== Group Update State ==========
+const updatingGroupIds = ref<Set<string>>(new Set())
+const selectedGroupForBulk = ref<string | null>(null)
 
 // ========== Filtering State ==========
 const selectedFileType = ref<string | null>(null)
@@ -351,6 +359,106 @@ async function copyAllChunks() {
     console.error('Failed to copy:', err)
   }
 }
+
+// ========== Bulk Delete State ==========
+const showBulkDeleteConfirm = ref(false)
+const deletingIds = ref<Set<string>>(new Set())
+
+// ========== Bulk Group Update ==========
+
+async function updateSelectedFilesGroup() {
+  if (selectedFileIds.value.length === 0) {
+    toast.add({ title: 'No files selected', color: 'warning' })
+    return
+  }
+
+  if (selectedGroupForBulk.value === null) {
+    toast.add({ title: 'Please select a group', color: 'warning' })
+    return
+  }
+
+  updatingGroupIds.value = new Set(selectedFileIds.value)
+
+  try {
+    // Convert NO_GROUP_VALUE sentinel to null
+    const groupId = selectedGroupForBulk.value === NO_GROUP_VALUE
+      ? null
+      : selectedGroupForBulk.value
+
+    // Update each file
+    for (const id of selectedFileIds.value) {
+      await updateDocumentGroup(id, groupId)
+
+      // Update local state in both arrays
+      const filenameFile = filenameMatches.value.find(f => f.id === id)
+      if (filenameFile) {
+        filenameFile.group_id = groupId
+        filenameFile.group_name = null
+      }
+
+      const semanticFile = semanticMatches.value.find(f => f.id === id)
+      if (semanticFile) {
+        semanticFile.group_id = groupId
+        semanticFile.group_name = null
+      }
+    }
+
+    toast.add({
+      title: `Updated ${selectedFileIds.value.length} file(s)`,
+      color: 'success',
+      icon: 'i-lucide-check'
+    })
+
+    // Clear selections
+    selectedGroupForBulk.value = null
+    selectedFileIds.value = []
+
+  } catch (e: any) {
+    toast.add({
+      title: e?.message ?? 'Failed to update files',
+      color: 'error',
+      icon: 'i-lucide-alert-triangle'
+    })
+  } finally {
+    updatingGroupIds.value.clear()
+  }
+}
+
+// ========== Bulk Delete ==========
+
+async function confirmBulkDelete() {
+  deletingIds.value = new Set(selectedFileIds.value)
+
+  try {
+    // Delete each file
+    for (const id of selectedFileIds.value) {
+      await deleteDocument(id)
+
+      // Remove from local state
+      filenameMatches.value = filenameMatches.value.filter(f => f.id !== id)
+      semanticMatches.value = semanticMatches.value.filter(f => f.id !== id)
+    }
+
+    toast.add({
+      title: `Deleted ${selectedFileIds.value.length} file(s)`,
+      color: 'success',
+      icon: 'i-lucide-check'
+    })
+
+    // Clear selections
+    selectedFileIds.value = []
+    showBulkDeleteConfirm.value = false
+
+  } catch (e: any) {
+    toast.add({
+      title: e?.message ?? 'Failed to delete files',
+      color: 'error',
+      icon: 'i-lucide-alert-triangle'
+    })
+  } finally {
+    deletingIds.value.clear()
+  }
+}
 </script>
 
 <template>
@@ -408,6 +516,8 @@ async function copyAllChunks() {
             :enable-hover-preview="true"
             :chunk-map="chunkMap"
             :context-menu-items="fileContextMenuItems"
+            :enable-selection="true"
+            v-model:selected-ids="selectedFileIds"
             @open-file="handleOpenFile"
           />
         </div>
@@ -433,6 +543,8 @@ async function copyAllChunks() {
             :enable-hover-preview="true"
             :chunk-map="chunkMap"
             :context-menu-items="fileContextMenuItems"
+            :enable-selection="true"
+            v-model:selected-ids="selectedFileIds"
             @open-file="handleOpenFile"
           />
         </div>
@@ -507,6 +619,91 @@ async function copyAllChunks() {
         <div class="flex justify-end gap-3">
           <UButton variant="ghost" @click="showDeleteConfirm = false">Cancel</UButton>
           <UButton color="error" @click="confirmDelete">Delete</UButton>
+        </div>
+      </div>
+    </template>
+  </UModal>
+
+  <!-- Bulk Actions Popup (Bottom of Screen) -->
+  <Transition
+    enter-active-class="transition-all duration-300"
+    enter-from-class="translate-y-full opacity-0"
+    enter-to-class="translate-y-0 opacity-100"
+    leave-active-class="transition-all duration-300"
+    leave-from-class="translate-y-0 opacity-100"
+    leave-to-class="translate-y-full opacity-0"
+  >
+    <div v-if="selectedFileIds.length > 0" class="fixed bottom-0 left-0 right-0 z-40 bg-black/80 backdrop-blur-sm border-t border-foreground/10 shadow-2xl">
+      <div class="max-w-6xl mx-auto px-6 py-4">
+        <div class="flex flex-wrap gap-4 items-center justify-between">
+          <div class="text-sm font-medium text-foreground">
+            {{ selectedFileIds.length }} file(s) selected
+          </div>
+
+          <div class="flex flex-wrap gap-4 items-center">
+            <div class="flex items-center gap-2">
+              <label class="text-sm font-medium">Set Group:</label>
+              <GroupSelect
+                v-model="selectedGroupForBulk"
+                :include-no-group="true"
+              />
+            </div>
+
+            <UButton
+              color="primary"
+              icon="i-lucide-check"
+              variant="outline"
+              size="sm"
+              :disabled="!selectedFileIds.length || !selectedGroupForBulk || updatingGroupIds.size > 0"
+              :loading="updatingGroupIds.size > 0"
+              @click="updateSelectedFilesGroup"
+            >
+              Apply to Selected
+            </UButton>
+
+            <UButton
+              variant="outline"
+              color="neutral"
+              size="sm"
+              @click="selectedFileIds = []"
+            >
+              Clear Selection
+            </UButton>
+
+            <div class="border-l border-foreground/10" />
+
+            <UButton
+              color="error"
+              icon="i-lucide-trash-2"
+              variant="outline"
+              size="sm"
+              @click="showBulkDeleteConfirm = true"
+            >
+              Delete Selected
+            </UButton>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+  <!-- Bulk Delete Confirmation Modal -->
+  <UModal v-model:open="showBulkDeleteConfirm">
+    <template #content>
+      <div class="p-6 space-y-4">
+        <h3 class="text-lg font-semibold">Delete files</h3>
+        <p class="text-foreground/70">
+          Are you sure you want to delete <strong>{{ selectedFileIds.length }} file(s)</strong>? This action cannot be undone.
+        </p>
+        <div class="flex justify-end gap-3">
+          <UButton variant="ghost" @click="showBulkDeleteConfirm = false">Cancel</UButton>
+          <UButton
+            color="error"
+            :loading="deletingIds.size > 0"
+            @click="confirmBulkDelete"
+          >
+            Delete
+          </UButton>
         </div>
       </div>
     </template>
