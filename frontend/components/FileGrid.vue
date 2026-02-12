@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { DocumentItem } from '@/composables/useDocuments'
+import type { TableColumn } from '@nuxt/ui'
+import { h, resolveComponent } from 'vue'
 
 export interface ContextMenuItem {
   label: string
@@ -17,9 +19,15 @@ interface Props {
   enableSelection?: boolean
   selectedIds?: string[]
   groupColors?: Record<string, string>
+  viewMode?: 'grid' | 'list'
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  viewMode: 'grid'
+})
+
+// Table reference for UTable API
+const table = ref()
 
 // Thumbnail URL state
 const thumbnailUrls = ref<Record<string, string>>({})
@@ -61,8 +69,8 @@ const someSelected = computed(() => {
 })
 
 // Selection handlers
-function toggleSelection(fileId: string, event: Event) {
-  event.stopPropagation() // Prevent opening file
+function toggleSelection(fileId: string, event?: Event) {
+  event?.stopPropagation() // Prevent opening file
 
   if (localSelectedIds.value.has(fileId)) {
     localSelectedIds.value.delete(fileId)
@@ -131,10 +139,179 @@ function formatChunksPages(file: DocumentItem): string | null {
   return parts.length > 0 ? parts.join(' • ') : null
 }
 
+// Get file type badge text from mime type
+function getFileTypeBadge(mimeType: string): string {
+  if (mimeType.includes('pdf')) return 'PDF'
+  if (mimeType.startsWith('image/')) return 'Image'
+  if (mimeType.startsWith('video/')) return 'Video'
+  if (mimeType.includes('wordprocessingml')) return 'Word'
+  if (mimeType.includes('spreadsheetml')) return 'Excel'
+  if (mimeType.includes('presentationml')) return 'PowerPoint'
+  if (mimeType.startsWith('audio/')) return 'Audio'
+  if (mimeType.startsWith('text/')) return 'Text'
+  return 'File'
+}
+
 const emit = defineEmits<{
   'open-file': [file: DocumentItem]
   'update:selectedIds': [ids: string[]]
 }>()
+
+// Table columns for list view
+const columns = computed<TableColumn<DocumentItem>[]>(() => {
+  // Resolve Nuxt UI components for h() usage
+  const UCheckbox = resolveComponent('UCheckbox') as any
+  const UIcon = resolveComponent('UIcon') as any
+  const UBadge = resolveComponent('UBadge') as any
+  const UButton = resolveComponent('UButton') as any
+
+  const cols: TableColumn<DocumentItem>[] = []
+
+  // Selection column
+  if (props.enableSelection) {
+    cols.push({
+      id: 'select',
+      header: () => h(UCheckbox, {
+        modelValue: someSelected.value ? 'indeterminate' : allSelected.value,
+        'onUpdate:modelValue': toggleSelectAll,
+        'aria-label': 'Select all files'
+      }),
+      cell: ({ row }) => h(UCheckbox, {
+        modelValue: isSelected(row.original.id),
+        'onUpdate:modelValue': () => toggleSelection(row.original.id),
+        'aria-label': 'Select file'
+      }),
+      enableSorting: false
+    })
+  }
+
+  // Name column with thumbnail
+  cols.push({
+    accessorKey: 'filename',
+    header: 'Name',
+    cell: ({ row }) => h('div', {
+      class: 'flex items-center gap-2 min-w-0 max-w-[250px]',
+      onClick: () => emit('open-file', row.original),
+      onContextmenu: (e: MouseEvent) => onContextMenu(e, row.original)
+    }, [
+      h('div', { class: 'flex-shrink-0 w-8 h-8 rounded overflow-hidden flex items-center justify-center bg-background/50' }, [
+        (row.original.mime_type?.startsWith('image/') || row.original.mime_type?.startsWith('video/')) && thumbnailUrls.value[row.original.id]
+          ? h('img', {
+              src: thumbnailUrls.value[row.original.id],
+              alt: row.original.filename,
+              class: 'w-full h-full object-cover',
+              onError: () => delete thumbnailUrls.value[row.original.id]
+            })
+          : h(UIcon, { name: getFileIcon(row.original.mime_type), class: 'w-4 h-4 text-foreground/60' })
+      ]),
+      h('span', {
+        class: 'text-sm text-foreground truncate min-w-0',
+        title: row.original.filename
+      }, row.original.filename)
+    ])
+  })
+
+  // Type column
+  cols.push({
+    accessorKey: 'mime_type',
+    header: 'Type',
+    cell: ({ row }) => h('div', {
+      onClick: () => emit('open-file', row.original),
+      onContextmenu: (e: MouseEvent) => onContextMenu(e, row.original)
+    }, [
+      row.original.mime_type
+        ? h(UBadge, {
+            size: 'xs',
+            variant: 'soft',
+            color: 'primary',
+            class: 'text-xs'
+          }, () => getFileTypeBadge(row.original.mime_type!))
+        : h('span', { class: 'text-sm text-foreground/40' }, '—')
+    ])
+  })
+
+  // Size column
+  cols.push({
+    accessorKey: 'file_size_bytes',
+    header: 'Size',
+    cell: ({ row }) => h('span', {
+      class: 'text-sm text-foreground/70',
+      onClick: () => emit('open-file', row.original),
+      onContextmenu: (e: MouseEvent) => onContextMenu(e, row.original)
+    }, formatSize(row.original.file_size_bytes))
+  })
+
+  // Group column
+  cols.push({
+    accessorKey: 'group_name',
+    header: 'Group',
+    cell: ({ row }) => {
+      const hasGroupColor = row.original.group_id && props.groupColors?.[row.original.group_id]
+
+      return h('div', {
+        onClick: () => emit('open-file', row.original),
+        onContextmenu: (e: MouseEvent) => onContextMenu(e, row.original)
+      },
+        row.original.group_name
+          ? h('div', { class: 'flex items-center gap-2' }, [
+              ...(hasGroupColor ? [h('div', {
+                class: 'w-2 h-2 rounded-full flex-shrink-0',
+                style: { backgroundColor: props.groupColors![row.original.group_id!] }
+              })] : []),
+              h('span', {
+                class: 'text-sm text-foreground/70 truncate',
+                title: row.original.group_name
+              }, row.original.group_name)
+            ])
+          : h('span', { class: 'text-sm text-foreground/40' }, '—')
+      )
+    }
+  })
+
+  // Date column
+  cols.push({
+    accessorKey: 'created_at',
+    header: 'Date',
+    cell: ({ row }) => h('span', {
+      class: 'text-sm text-foreground/70',
+      onClick: () => emit('open-file', row.original),
+      onContextmenu: (e: MouseEvent) => onContextMenu(e, row.original)
+    }, formatDate(row.original.created_at))
+  })
+
+  // Chunks/Pages column
+  cols.push({
+    id: 'chunks_pages',
+    header: 'Chunks/Pages',
+    cell: ({ row }) => h('span', {
+      class: 'text-sm text-foreground/70',
+      onClick: () => emit('open-file', row.original),
+      onContextmenu: (e: MouseEvent) => onContextMenu(e, row.original)
+    }, formatChunksPages(row.original) || '—')
+  })
+
+  // Actions column
+  if (props.contextMenuItems?.length) {
+    cols.push({
+      id: 'actions',
+      header: 'Actions',
+      cell: ({ row }) => h(UButton, {
+        variant: 'ghost',
+        size: 'xs',
+        icon: 'i-heroicons-ellipsis-vertical',
+        onClick: (e: MouseEvent) => {
+          e.stopPropagation()
+          onContextMenu(e, row.original)
+        },
+        'aria-label': 'More actions',
+        class: 'text-foreground/60'
+      }),
+      enableSorting: false
+    })
+  }
+
+  return cols
+})
 
 // Context menu state
 const contextMenu = ref<{ x: number; y: number; file: DocumentItem } | null>(null)
@@ -190,8 +367,8 @@ onUnmounted(() => {
 
 <template>
   <div>
-    <!-- Select All Header (only shown when enableSelection is true) -->
-    <div v-if="enableSelection && files.length > 0" class="flex items-center gap-2 mb-3 px-2">
+    <!-- Select All Header (only shown for grid view when enableSelection is true) -->
+    <div v-if="enableSelection && files.length > 0 && viewMode === 'grid'" class="flex items-center gap-2 mb-3 px-2">
       <UCheckbox
         :model-value="someSelected ? 'indeterminate' : allSelected"
         @update:model-value="toggleSelectAll"
@@ -202,11 +379,11 @@ onUnmounted(() => {
       </span>
     </div>
 
-    <!-- File Grid -->
+    <!-- Grid View -->
     <div
-      v-if="!loading && files.length > 0"
+      v-if="!loading && files.length > 0 && viewMode === 'grid'"
       class="grid gap-3"
-      style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))"
+      style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); grid-auto-rows: 155px;"
     >
       <UPopover
         v-for="file in files"
@@ -218,7 +395,7 @@ onUnmounted(() => {
         arrow
       >
         <button
-          class="glass-card group flex flex-col cursor-pointer text-left w-full gap-0 rounded-xl p-3 transition-all duration-300 relative"
+          class="glass-card group flex flex-col cursor-pointer text-left w-full h-full gap-0 rounded-xl p-3 transition-all duration-300 relative"
           :class="{ 'ring-2 ring-purple-500': enableSelection && isSelected(file.id) }"
           @click="emit('open-file', file)"
           @contextmenu="onContextMenu($event, file)"
@@ -245,7 +422,7 @@ onUnmounted(() => {
           />
 
           <!-- File Thumbnail or Icon -->
-          <div class="flex justify-center items-center rounded-lg overflow-hidden" style="height: 84px">
+          <div class="flex justify-center items-center rounded-lg overflow-hidden mt-6" style="height: 84px">
             <!-- Show thumbnail for images and videos if available -->
             <div
               v-if="(file.mime_type?.startsWith('image/') || file.mime_type?.startsWith('video/')) && thumbnailUrls[file.id]"
@@ -275,7 +452,7 @@ onUnmounted(() => {
 
           <!-- Filename -->
           <h3
-            class="font-medium text-[11px] text-white/80 group-hover:text-white leading-tight whitespace-normal mt-2 transition-colors duration-300"
+            class="font-medium text-[11px] text-white/80 group-hover:text-white leading-tight mt-2 transition-colors duration-300 line-clamp-3 overflow-hidden"
             :title="file.filename"
           >
             {{ file.filename }}
@@ -339,6 +516,23 @@ onUnmounted(() => {
         </template>
       </UPopover>
     </div>
+
+    <!-- List View -->
+    <UTable
+      v-if="!loading && files.length > 0 && viewMode === 'list'"
+      ref="table"
+      :data="files"
+      :columns="columns"
+      :loading="loading"
+      :ui="{
+        base: 'rounded-lg overflow-hidden border border-foreground/10 backdrop-blur-md bg-background/30 table-striped',
+        thead: 'bg-zinc-900 backdrop-blur-sm sticky top-0 z-10',
+        th: 'text-left font-semibold text-sm text-foreground/80 px-3 py-2',
+        tbody: '',
+        tr: 'cursor-pointer transition-colors hover:bg-foreground/5',
+        td: 'px-3 py-2'
+      }"
+    />
 
     <!-- Loading State -->
     <div v-if="loading" class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))">
@@ -406,5 +600,10 @@ onUnmounted(() => {
 
 .glass-card.ring-2 {
   border-color: rgba(168, 85, 247, 0.5);
+}
+
+/* Alternating row colors for list view */
+:deep(.table-striped tbody tr:nth-child(even)) {
+  background-color: rgb(24 24 27); /* zinc-900 */
 }
 </style>

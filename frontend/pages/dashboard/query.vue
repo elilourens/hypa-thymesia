@@ -28,6 +28,19 @@ const loading = ref(false)
 const semanticLoading = ref(false)
 const error = ref<string | null>(null)
 
+// ========== View Mode State ==========
+const viewMode = ref<'grid' | 'list'>(
+  typeof window !== 'undefined'
+    ? (localStorage.getItem('fileViewMode') as 'grid' | 'list') || 'grid'
+    : 'grid'
+)
+
+watch(viewMode, (newMode) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('fileViewMode', newMode)
+  }
+})
+
 // ========== Results State ==========
 const filenameMatches = ref<DocumentItem[]>([])
 const semanticMatches = ref<DocumentItem[]>([])
@@ -343,12 +356,12 @@ const showDeleteConfirm = ref(false)
 const fileContextMenuItems: ContextMenuItem[] = [
   {
     label: 'Open',
-    icon: 'i-lucide-external-link',
+    icon: 'i-heroicons-arrow-top-right-on-square',
     action: (file) => handleOpenFile(file),
   },
   {
     label: 'Copy filename',
-    icon: 'i-lucide-copy',
+    icon: 'i-heroicons-clipboard-document',
     action: async (file) => {
       await navigator.clipboard.writeText(file.filename)
       toast.add({ title: 'Copied filename', color: 'success' })
@@ -356,7 +369,7 @@ const fileContextMenuItems: ContextMenuItem[] = [
   },
   {
     label: 'Delete',
-    icon: 'i-lucide-trash-2',
+    icon: 'i-heroicons-trash',
     separator: true,
     action: (file) => {
       fileToDelete.value = file
@@ -445,7 +458,7 @@ async function updateSelectedFilesGroup() {
     toast.add({
       title: `Updated ${selectedFileIds.value.length} file(s)`,
       color: 'success',
-      icon: 'i-lucide-check'
+      icon: 'i-heroicons-check'
     })
 
     // Clear selections
@@ -456,7 +469,7 @@ async function updateSelectedFilesGroup() {
     toast.add({
       title: e?.message ?? 'Failed to update files',
       color: 'error',
-      icon: 'i-lucide-alert-triangle'
+      icon: 'i-heroicons-exclamation-triangle'
     })
   } finally {
     updatingGroupIds.value.clear()
@@ -481,7 +494,7 @@ async function confirmBulkDelete() {
     toast.add({
       title: `Deleted ${selectedFileIds.value.length} file(s)`,
       color: 'success',
-      icon: 'i-lucide-check'
+      icon: 'i-heroicons-check'
     })
 
     // Clear selections
@@ -492,7 +505,7 @@ async function confirmBulkDelete() {
     toast.add({
       title: e?.message ?? 'Failed to delete files',
       color: 'error',
-      icon: 'i-lucide-alert-triangle'
+      icon: 'i-heroicons-exclamation-triangle'
     })
   } finally {
     deletingIds.value.clear()
@@ -525,7 +538,7 @@ async function confirmBulkDelete() {
             :items="fileTypeOptions"
             value-key="value"
             placeholder="Filter by file type…"
-            icon="i-lucide-file"
+            icon="i-heroicons-document"
             clearable
             class="w-64"
           />
@@ -544,10 +557,30 @@ async function confirmBulkDelete() {
       <!-- Filename Matches Section -->
       <div v-if="filteredFilenameMatches.length > 0" class="space-y-8">
         <div class="space-y-3">
-          <div class="flex items-center gap-2 px-2">
-            <UIcon name="i-lucide-file-text" class="w-5 h-5" />
-            <h2 class="text-lg font-semibold">Filename Matches</h2>
-            <span class="text-sm text-foreground/60">({{ filteredFilenameMatches.length }})</span>
+          <div class="flex items-center justify-between mb-3 px-2">
+            <div class="flex items-center gap-2">
+              <UIcon name="i-heroicons-document-text" class="w-5 h-5" />
+              <h2 class="text-lg font-semibold">Filename Matches</h2>
+              <span class="text-sm text-foreground/60">({{ filteredFilenameMatches.length }})</span>
+            </div>
+            <div class="flex gap-1 bg-neutral-800/50 rounded-lg p-1">
+              <UButton
+                icon="i-heroicons-squares-2x2"
+                :variant="viewMode === 'grid' ? 'solid' : 'ghost'"
+                :color="viewMode === 'grid' ? 'primary' : 'neutral'"
+                size="sm"
+                @click="viewMode = 'grid'"
+                aria-label="Grid view"
+              />
+              <UButton
+                icon="i-heroicons-list-bullet"
+                :variant="viewMode === 'list' ? 'solid' : 'ghost'"
+                :color="viewMode === 'list' ? 'primary' : 'neutral'"
+                size="sm"
+                @click="viewMode = 'list'"
+                aria-label="List view"
+              />
+            </div>
           </div>
           <FileGrid
             :files="filteredFilenameMatches"
@@ -557,6 +590,7 @@ async function confirmBulkDelete() {
             :context-menu-items="fileContextMenuItems"
             :enable-selection="true"
             :group-colors="groupColors"
+            :view-mode="viewMode"
             v-model:selected-ids="selectedFileIds"
             @open-file="handleOpenFile"
           />
@@ -567,13 +601,33 @@ async function confirmBulkDelete() {
       <div v-if="filteredSemanticMatches.length > 0 || semanticLoading" class="space-y-8">
         <div v-if="filteredFilenameMatches.length > 0" class="border-t border-foreground/10 my-4" />
         <div class="space-y-3">
-          <div class="flex items-center gap-2 px-2">
-            <UIcon :name="semanticLoading ? 'i-lucide-loader-2' : 'i-lucide-brain'" :class="semanticLoading ? 'w-5 h-5 animate-spin' : 'w-5 h-5'" />
-            <h2 class="text-lg font-semibold">Semantic Matches</h2>
-            <span class="text-sm text-foreground/60">({{ filteredSemanticMatches.length }})</span>
+          <div class="flex items-center justify-between mb-3 px-2">
+            <div class="flex items-center gap-2">
+              <UIcon :name="semanticLoading ? 'i-heroicons-arrow-path' : 'i-heroicons-cpu-chip'" :class="semanticLoading ? 'w-5 h-5 animate-spin' : 'w-5 h-5'" />
+              <h2 class="text-lg font-semibold">Semantic Matches</h2>
+              <span class="text-sm text-foreground/60">({{ filteredSemanticMatches.length }})</span>
+            </div>
+            <div class="flex gap-1 bg-neutral-800/50 rounded-lg p-1">
+              <UButton
+                icon="i-heroicons-squares-2x2"
+                :variant="viewMode === 'grid' ? 'solid' : 'ghost'"
+                :color="viewMode === 'grid' ? 'primary' : 'neutral'"
+                size="sm"
+                @click="viewMode = 'grid'"
+                aria-label="Grid view"
+              />
+              <UButton
+                icon="i-heroicons-list-bullet"
+                :variant="viewMode === 'list' ? 'solid' : 'ghost'"
+                :color="viewMode === 'list' ? 'primary' : 'neutral'"
+                size="sm"
+                @click="viewMode = 'list'"
+                aria-label="List view"
+              />
+            </div>
           </div>
           <div v-if="semanticLoading && filteredSemanticMatches.length === 0" class="text-center py-8">
-            <UIcon name="i-lucide-loader-2" class="w-6 h-6 mx-auto animate-spin text-foreground/50 mb-2" />
+            <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 mx-auto animate-spin text-foreground/50 mb-2" />
             <p class="text-sm text-foreground/60">Analyzing content...</p>
           </div>
           <FileGrid
@@ -585,6 +639,7 @@ async function confirmBulkDelete() {
             :context-menu-items="fileContextMenuItems"
             :enable-selection="true"
             :group-colors="groupColors"
+            :view-mode="viewMode"
             v-model:selected-ids="selectedFileIds"
             @open-file="handleOpenFile"
           />
@@ -596,13 +651,13 @@ async function confirmBulkDelete() {
         <div v-if="filteredFilenameMatches.length > 0 || filteredSemanticMatches.length > 0" class="border-t border-foreground/10 my-4" />
         <div class="space-y-3">
           <div class="flex items-center gap-2 px-2">
-            <UIcon :name="semanticLoading ? 'i-lucide-loader-2' : 'i-lucide-sparkles'" :class="semanticLoading ? 'w-5 h-5 animate-spin' : 'w-5 h-5'" />
+            <UIcon :name="semanticLoading ? 'i-heroicons-arrow-path' : 'i-heroicons-sparkles'" :class="semanticLoading ? 'w-5 h-5 animate-spin' : 'w-5 h-5'" />
             <h2 class="text-lg font-semibold">Relevant Content</h2>
             <span class="text-sm text-foreground/60">({{ filteredChunks.length }})</span>
           </div>
           <div class="flex justify-end mb-4" v-if="filteredChunks.length > 0">
             <UButton
-              icon="i-lucide-copy"
+              icon="i-heroicons-clipboard-document"
               color="primary"
               variant="soft"
               @click="copyAllChunks"
@@ -611,7 +666,7 @@ async function confirmBulkDelete() {
             </UButton>
           </div>
           <div v-if="semanticLoading && filteredChunks.length === 0" class="text-center py-8">
-            <UIcon name="i-lucide-loader-2" class="w-6 h-6 mx-auto animate-spin text-foreground/50 mb-2" />
+            <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 mx-auto animate-spin text-foreground/50 mb-2" />
             <p class="text-sm text-foreground/60">Extracting relevant content...</p>
           </div>
           <ResultList v-if="filteredChunks.length > 0" :results="filteredChunks" />
@@ -620,7 +675,7 @@ async function confirmBulkDelete() {
 
       <!-- Loading State -->
       <div v-if="loading && !filteredFilenameMatches.length && !filteredSemanticMatches.length && !filteredChunks.length" class="text-center py-12">
-        <UIcon name="i-lucide-loader-2" class="w-8 h-8 mx-auto animate-spin text-foreground/50" />
+        <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 mx-auto animate-spin text-foreground/50" />
         <p class="mt-4 text-foreground/60">Searching...</p>
       </div>
 
@@ -629,7 +684,7 @@ async function confirmBulkDelete() {
         v-if="!loading && !filteredFilenameMatches.length && !filteredSemanticMatches.length && !filteredChunks.length"
         class="text-center py-12 text-foreground/50"
       >
-        <UIcon name="i-lucide-folder-open" class="w-12 h-12 mx-auto mb-4" />
+        <UIcon name="i-heroicons-folder-open" class="w-12 h-12 mx-auto mb-4" />
         <p class="text-lg">
           {{ hasSearched ? 'No results found' : 'Start typing to search files and content' }}
         </p>
@@ -692,7 +747,7 @@ async function confirmBulkDelete() {
 
             <UButton
               color="primary"
-              icon="i-lucide-check"
+              icon="i-heroicons-check"
               variant="outline"
               size="sm"
               :disabled="!selectedFileIds.length || !selectedGroupForBulk || updatingGroupIds.size > 0"
@@ -715,7 +770,7 @@ async function confirmBulkDelete() {
 
             <UButton
               color="error"
-              icon="i-lucide-trash-2"
+              icon="i-heroicons-trash"
               variant="outline"
               size="sm"
               @click="showBulkDeleteConfirm = true"
