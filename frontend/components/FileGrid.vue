@@ -20,6 +20,7 @@ interface Props {
   selectedIds?: string[]
   groupColors?: Record<string, string>
   viewMode?: 'grid' | 'list'
+  providedThumbnailUrls?: Record<string, string> // For demo/testing purposes
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,8 +35,14 @@ const thumbnailUrls = ref<Record<string, string>>({})
 const { getThumbnailUrl } = useDocuments()
 
 // Watch for files changes and fetch thumbnails
-watch(() => props.files, async (newFiles) => {
+watch([() => props.files, () => props.providedThumbnailUrls], async ([newFiles, providedUrls]) => {
   if (!newFiles) return
+
+  // If provided thumbnail URLs exist, use those instead of fetching
+  if (providedUrls) {
+    thumbnailUrls.value = { ...providedUrls }
+    return
+  }
 
   // Fetch thumbnails for image and video files
   for (const file of newFiles) {
@@ -592,14 +599,14 @@ onUnmounted(() => {
   border-left-color: rgba(255, 255, 255, 0.25);
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.5),
-    0 0 24px rgba(168, 85, 247, 0.08),
+    0 0 24px rgb(var(--color-secondary-500) / 0.15),
     inset 0 1px 1px rgba(255, 255, 255, 0.15),
     inset 0 -1px 1px rgba(255, 255, 255, 0.05);
   transform: translateY(-2px);
 }
 
 .glass-card.ring-2 {
-  border-color: rgba(168, 85, 247, 0.5);
+  border-color: rgb(var(--color-secondary-500) / 0.5);
 }
 
 /* Alternating row colors for list view */

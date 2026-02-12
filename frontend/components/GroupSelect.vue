@@ -14,7 +14,7 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: string | null): void
 }>()
 
-const { groups, loading, fetchGroups } = useGroupsCache()
+const { groups, fetchGroups } = useGroupsCache()
 
 const options = computed(() => {
   const base: { label: string; value: string | null; color?: string }[] = []
@@ -38,7 +38,6 @@ onMounted(() => fetchGroups())
     value-key="value"
     :placeholder="props.placeholder ?? 'Select group…'"
     :search-input="{ placeholder: 'Search groups…' }"
-    :loading="loading"
     icon="i-lucide-users"
     class="w-72"
   >

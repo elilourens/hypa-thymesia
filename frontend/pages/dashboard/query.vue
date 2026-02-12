@@ -68,6 +68,15 @@ const fileTypeOptions = [
   { label: 'Text', value: 'text/' },
 ]
 
+const selectedPageCount = ref<string | null>(null)
+const pageCountOptions = [
+  { label: 'All Pages', value: null },
+  { label: '1-10 pages', value: '1-10' },
+  { label: '11-50 pages', value: '11-50' },
+  { label: '51-100 pages', value: '51-100' },
+  { label: '100+ pages', value: '100+' },
+]
+
 // Pagination state for default file list
 const filesPage = ref(1)
 const filesHasMore = ref(false)
@@ -78,27 +87,80 @@ const groupColors = computed(() =>
   Object.fromEntries(cachedGroups.value.map(g => [g.id, g.color]))
 )
 
+// ========== Helper: Page Count Filter ==========
+function matchesPageCountFilter(pageCount?: number | null): boolean {
+  if (!selectedPageCount.value || !pageCount) return true
+
+  const range = selectedPageCount.value
+  if (range === '1-10') return pageCount >= 1 && pageCount <= 10
+  if (range === '11-50') return pageCount >= 11 && pageCount <= 50
+  if (range === '51-100') return pageCount >= 51 && pageCount <= 100
+  if (range === '100+') return pageCount > 100
+
+  return true
+}
+
 // ========== Computed: Filtered Results ==========
 const filteredFilenameMatches = computed(() => {
-  if (!selectedFileType.value) return filenameMatches.value
-  return filenameMatches.value.filter((f: DocumentItem) =>
-    f.mime_type?.includes(selectedFileType.value!) ?? false
-  )
+  let filtered = filenameMatches.value
+
+  // Filter by file type
+  if (selectedFileType.value) {
+    filtered = filtered.filter((f: DocumentItem) =>
+      f.mime_type?.includes(selectedFileType.value!) ?? false
+    )
+  }
+
+  // Filter by page count
+  if (selectedPageCount.value) {
+    filtered = filtered.filter((f: DocumentItem) =>
+      matchesPageCountFilter(f.page_count)
+    )
+  }
+
+  return filtered
 })
 
 const filteredSemanticMatches = computed(() => {
-  if (!selectedFileType.value) return semanticMatches.value
-  return semanticMatches.value.filter((f: DocumentItem) =>
-    f.mime_type?.includes(selectedFileType.value!) ?? false
-  )
+  let filtered = semanticMatches.value
+
+  // Filter by file type
+  if (selectedFileType.value) {
+    filtered = filtered.filter((f: DocumentItem) =>
+      f.mime_type?.includes(selectedFileType.value!) ?? false
+    )
+  }
+
+  // Filter by page count
+  if (selectedPageCount.value) {
+    filtered = filtered.filter((f: DocumentItem) =>
+      matchesPageCountFilter(f.page_count)
+    )
+  }
+
+  return filtered
 })
 
 const filteredChunks = computed(() => {
-  if (!selectedFileType.value) return results.value
-  return results.value.filter(chunk => {
-    const mime = chunk.metadata?.mime_type || ''
-    return mime.includes(selectedFileType.value!)
-  })
+  let filtered = results.value
+
+  // Filter by file type
+  if (selectedFileType.value) {
+    filtered = filtered.filter(chunk => {
+      const mime = chunk.metadata?.mime_type || ''
+      return mime.includes(selectedFileType.value!)
+    })
+  }
+
+  // Filter by page count
+  if (selectedPageCount.value) {
+    filtered = filtered.filter(chunk => {
+      const pageCount = chunk.metadata?.page_count
+      return matchesPageCountFilter(pageCount)
+    })
+  }
+
+  return filtered
 })
 
 // ========== Dual Search & File Loading ==========
@@ -531,7 +593,7 @@ async function confirmBulkDelete() {
           />
         </div>
 
-        <div class="flex gap-4">
+        <div class="flex gap-4 flex-wrap">
           <GroupSelect v-model="selectedGroup" includeAll />
           <USelectMenu
             v-model="selectedFileType"
@@ -539,6 +601,15 @@ async function confirmBulkDelete() {
             value-key="value"
             placeholder="Filter by file type…"
             icon="i-heroicons-document"
+            clearable
+            class="w-64"
+          />
+          <USelectMenu
+            v-model="selectedPageCount"
+            :items="pageCountOptions"
+            value-key="value"
+            placeholder="Filter by page count…"
+            icon="i-heroicons-document-text"
             clearable
             class="w-64"
           />

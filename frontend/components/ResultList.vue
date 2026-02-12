@@ -5,7 +5,11 @@ import { useFilesApi } from '~/composables/useFiles'
 const { getSignedUrl, getThumbnailUrl, getRagieImageUrl } = useFilesApi()
 const toast = useToast()
 
-const props = defineProps<{ results: any[], deleting?: boolean }>()
+const props = defineProps<{
+  results: any[],
+  deleting?: boolean,
+  disableActions?: boolean // Disable file open/download for demo mode
+}>()
 
 // ========== Video Player Modal State ==========
 const videoModalOpen = ref(false)
@@ -369,7 +373,7 @@ const pendingFetches = ref<Set<string>>(new Set())
 watch(
   () => props.results,
   async (newResults) => {
-    if (!newResults?.length) return
+    if (!newResults?.length || props.disableActions) return
     for (const r of newResults) {
       const modality = (r.metadata?.modality || '').toLowerCase()
 
@@ -580,7 +584,7 @@ watch(
             <!-- Show regular title for other results -->
             <span v-else>{{ getFileName(r.metadata?.title) }}</span>
           </h3>
-          <div class="flex items-center gap-2 flex-shrink-0">
+          <div v-if="!disableActions" class="flex items-center gap-2 flex-shrink-0">
             <!-- For extracted images, show "Open Document" button to open parent -->
             <UButton
               v-if="r.metadata?.source === 'extracted' && r.metadata?.parent_storage_path"
@@ -646,7 +650,7 @@ watch(
           <!-- Render markdown if available, otherwise show plain text -->
           <div
             v-html="renderMarkdown(getDisplayText(r))"
-            class="prose prose-sm max-w-none dark:prose-invert prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0"
+            class="prose prose-sm text-xs max-w-none dark:prose-invert prose-headings:mt-3 prose-headings:mb-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0"
           ></div>
 
           <!-- Display document tags if available -->
@@ -730,7 +734,7 @@ watch(
         <!-- Render video transcript hits -->
         <div v-else-if="r.metadata?.source === 'video_transcript'">
           <div class="p-3">
-            <p class="text-sm">"{{ r.metadata?.text }}"</p>
+            <p class="text-xs">"{{ r.metadata?.text }}"</p>
           </div>
 
           <div class="mt-2 space-y-1 text-sm text-gray-600">
