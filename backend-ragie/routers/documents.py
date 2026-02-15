@@ -349,6 +349,21 @@ async def delete_document(
             # Delete from database
             supabase.table("ragie_documents").delete().eq("id", doc_id).execute()
 
+        # Clean up Google Drive sync record if this file came from Google Drive
+        # With ON DELETE CASCADE, deleting ragie_documents automatically deletes google_drive_files
+        # This code is kept as explicit cleanup for clarity
+        if doc.get("source") == "google_drive":
+            try:
+                # Both documents and videos from Google Drive: ragie_document_id is the Supabase UUID (doc["id"])
+                # This FK references ragie_documents.id with ON DELETE CASCADE
+                supabase.table("google_drive_files").delete().eq(
+                    "ragie_document_id", doc["id"]
+                ).eq("user_id", current_user.id).execute()
+                logger.info(f"Cleaned up Google Drive sync record for document {doc_id}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up Google Drive sync record for {doc_id}: {e}")
+                # Don't fail the deletion if cleanup fails
+
         return DocumentDeleteResponse(
             message="Document deleted successfully",
             document_id=doc_id

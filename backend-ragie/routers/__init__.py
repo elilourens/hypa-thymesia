@@ -10,6 +10,7 @@ from .audit import router as audit_router
 from .storage import router as storage_router
 from .videos import router as videos_router
 from .ragie_webhooks import router as ragie_webhooks_router
+from .google_drive import router as google_drive_router
 
 __all__ = [
     "health_router",
@@ -22,4 +23,5 @@ __all__ = [
     "storage_router",
     "videos_router",
     "ragie_webhooks_router",
+    "google_drive_router",
 ]

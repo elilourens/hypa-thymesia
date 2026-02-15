@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     stripe_pro_price_id: str
     stripe_max_price_id: str
 
+    # Google Drive Configuration
+    google_client_id: str
+    google_client_secret: str
+    token_encryption_key: str  # Fernet key (32 bytes base64 encoded)
+
     # JWT Configuration
     jwt_algorithm: str = "HS256"
     jwt_secret_key: str

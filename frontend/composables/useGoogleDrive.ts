@@ -1,4 +1,5 @@
-import { ref, readonly, computed } from 'vue'
+import { ref, readonly, computed, onUnmounted } from 'vue'
+import type { SyncResponse } from '~/types/google-drive'
 
 interface GoogleDriveFile {
   id: string
@@ -12,9 +13,16 @@ interface GoogleDriveFile {
 
 export const useGoogleDrive = () => {
   // ========================================================================
+  // Configuration
+  // ========================================================================
+
+  const config = useRuntimeConfig()
+  const apiBase = config.public.apiBase || 'http://localhost:8000'
+
+  // ========================================================================
   // State
   // ========================================================================
-  
+
   const error = ref<string>('')
   const success = ref<string>('')
   const loading = ref<boolean>(false)
@@ -22,11 +30,41 @@ export const useGoogleDrive = () => {
   const googleLinked = ref<boolean>(false)
   const hasCheckedLink = ref<boolean>(false)
 
+  // AbortControllers for cancelling requests
+  const abortControllers = ref<Map<string, AbortController>>(new Map())
+
   // ========================================================================
   // Computed
   // ========================================================================
 
   const isInitialized = computed(() => hasCheckedLink.value)
+
+  // ========================================================================
+  // AbortController Helpers
+  // ========================================================================
+
+  const getAbortController = (key: string): AbortSignal => {
+    // Cancel previous request with same key
+    abortControllers.value.get(key)?.abort()
+
+    // Create new controller
+    const controller = new AbortController()
+    abortControllers.value.set(key, controller)
+    return controller.signal
+  }
+
+  const cleanup = () => {
+    // Abort all pending requests
+    abortControllers.value.forEach(controller => controller.abort())
+    abortControllers.value.clear()
+  }
+
+  // Cleanup on composable disposal
+  if (typeof window !== 'undefined') {
+    onUnmounted(() => {
+      cleanup()
+    })
+  }
 
   // ========================================================================
   // Core Token Management
@@ -44,7 +82,7 @@ export const useGoogleDrive = () => {
   ): Promise<void> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/save-google-token',
+        `${apiBase}/save-google-token`,
         {
           method: 'POST',
           headers: {
@@ -120,23 +158,17 @@ export const useGoogleDrive = () => {
           return false
         }
 
-        console.log('[useGoogleDrive] Found valid Google provider tokens in session, saving...')
+        console.log('[useGoogleDrive] Found valid Google provider tokens in session!')
 
-        const googleTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
+        // Mark as linked - tokens are in session and will be saved to backend when connecting a folder
+        googleLinked.value = true
 
-        await saveGoogleToken(
-          session.access_token!,
-          (session as any).provider_token,
-          (session as any).provider_refresh_token,
-          googleTokenExpiresAt
-        )
-
-        console.log('[useGoogleDrive] Tokens saved successfully from session!')
-
-        // Clear URL params after successful save to prevent other composables from trying to process the same tokens
+        // Clear URL params after successful OAuth to clean up URL
         const url = new URL(window.location.href)
         url.searchParams.delete('code')
         window.history.replaceState({}, '', url.toString())
+
+        console.log('[useGoogleDrive] Google linked successfully!')
 
         return true
       }
@@ -165,49 +197,17 @@ export const useGoogleDrive = () => {
     success.value = ''
 
     try {
-      let subscription: any
+      // Validate origin against allowed URLs
+      const config = useRuntimeConfig()
+      const allowedOrigins = [
+        config.public.appUrl || window.location.origin,
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+      ]
 
-      // Listen for auth state changes when linking
-      const { data } = supabaseClient.auth.onAuthStateChange(
-        async (event: string, session: any) => {
-          // When linking (not signing in), we get provider_token in the session
-          if (session?.provider_token) {
-            try {
-              const { data: { session: currentSession } } =
-                await supabaseClient.auth.getSession()
-
-              if (!currentSession?.access_token) {
-                throw new Error('No session access token')
-              }
-
-              // Calculate Google token expiration time (typically 1 hour = 3600 seconds)
-              // The session.expires_at is for Supabase session, not Google token
-              // Google tokens typically expire in 3600 seconds (1 hour)
-              const googleTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
-
-              // Save tokens to backend
-              await saveGoogleToken(
-                currentSession.access_token,
-                session.provider_token,
-                session.provider_refresh_token,
-                googleTokenExpiresAt
-              )
-
-              success.value = 'Google account linked successfully!'
-              googleLinked.value = true
-
-              // Clean up listener
-              subscription?.unsubscribe()
-            } catch (err) {
-              error.value = 'Linked but failed to save token. Please try again.'
-              subscription?.unsubscribe()
-              throw err
-            }
-          }
-        }
-      )
-
-      subscription = data.subscription
+      if (!allowedOrigins.includes(window.location.origin)) {
+        throw new Error('Invalid origin - OAuth redirect not allowed from this domain')
+      }
 
       // Build query params - always force consent to ensure refresh token
       // Google only returns refresh tokens on first auth OR when prompt=consent is used
@@ -216,11 +216,14 @@ export const useGoogleDrive = () => {
         prompt: 'consent' // Force consent screen to ensure we get a refresh token
       }
 
+      // Build redirect URL with validated origin
+      const redirectTo = `${window.location.origin}/dashboard/connections`
+
       // Initiate the OAuth link with Supabase
       const { error: linkError } = await supabaseClient.auth.linkIdentity({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/dashboard/upload`,
+          redirectTo,
           scopes: [
             'https://www.googleapis.com/auth/drive.readonly',
             'https://www.googleapis.com/auth/drive.metadata.readonly'
@@ -231,7 +234,6 @@ export const useGoogleDrive = () => {
 
       if (linkError) {
         error.value = linkError.message
-        subscription?.unsubscribe()
         throw linkError
       }
     } catch (err) {
@@ -287,7 +289,7 @@ export const useGoogleDrive = () => {
 
       // Delete tokens from backend and revoke with Google
       const response = await fetch(
-        'http://localhost:8000/api/v1/unlink-google',
+        `${apiBase}/unlink-google`,
         {
           method: 'DELETE',
           headers: {
@@ -324,7 +326,7 @@ export const useGoogleDrive = () => {
   ): Promise<boolean> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/google-linked',
+        `${apiBase}/google-linked`,
         {
           headers: {
             'Authorization': `Bearer ${supabaseAccessToken}`,
@@ -353,7 +355,7 @@ export const useGoogleDrive = () => {
   ): Promise<boolean> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/google-needs-consent',
+        `${apiBase}/google-needs-consent`,
         {
           headers: {
             'Authorization': `Bearer ${supabaseAccessToken}`,
@@ -393,13 +395,14 @@ export const useGoogleDrive = () => {
       }
 
       const response = await fetch(
-        `http://localhost:8000/api/v1/google-drive-files?${params.toString()}`,
+        `${apiBase}/google-drive-files?${params.toString()}`,
         {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${supabaseAccessToken}`,
             'Content-Type': 'application/json'
-          }
+          },
+          signal: getAbortController('fetchGoogleDriveFiles')
         }
       )
 
@@ -425,6 +428,10 @@ export const useGoogleDrive = () => {
         nextPageToken: data.nextPageToken
       }
     } catch (err) {
+      // Silent abort
+      if (err instanceof Error && err.name === 'AbortError') {
+        return { files: [] }
+      }
       const message = err instanceof Error ? err.message : 'Unknown error'
       error.value = `Failed to fetch Google Drive files: ${message}`
       return { files: [] }
@@ -452,7 +459,7 @@ export const useGoogleDrive = () => {
   ): Promise<any> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/ingest-google-drive-file',
+        `${apiBase}/ingest-google-drive-file`,
         {
           method: 'POST',
           headers: {
@@ -472,6 +479,167 @@ export const useGoogleDrive = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       throw new Error(`Failed to ingest Google Drive file: ${message}`)
+    }
+  }
+
+  // ========================================================================
+  // Google Drive Folder Sync
+  // ========================================================================
+
+  /**
+   * Connect a Google Drive folder for automatic syncing.
+   */
+  const connectGoogleDriveFolder = async (
+    supabaseAccessToken: string,
+    googleAccessToken: string,
+    googleRefreshToken: string,
+    tokenExpiresIn: number,
+    folderId: string,
+    folderName: string,
+    groupId?: string
+  ): Promise<void> => {
+    try {
+      const response = await fetch(
+        `${apiBase}/google-drive/connect-folder`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            folder_id: folderId,
+            folder_name: folderName,
+            group_id: groupId,
+            access_token: googleAccessToken,
+            refresh_token: googleRefreshToken,
+            token_expires_in: tokenExpiresIn
+          })
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to connect folder')
+      }
+
+      const data = await response.json()
+      success.value = data.message
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to connect folder'
+      throw err
+    }
+  }
+
+  /**
+   * Get sync configuration.
+   */
+  const getSyncConfig = async (
+    supabaseAccessToken: string
+  ): Promise<any> => {
+    try {
+      const response = await fetch(
+        `${apiBase}/google-drive/sync-config`,
+        {
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to get sync config')
+      }
+
+      return await response.json()
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to get sync config'
+      return null
+    }
+  }
+
+  /**
+   * Disconnect Google Drive sync.
+   */
+  const disconnectGoogleDrive = async (
+    supabaseAccessToken: string
+  ): Promise<void> => {
+    try {
+      const response = await fetch(
+        `${apiBase}/google-drive/disconnect`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to disconnect')
+      }
+
+      success.value = 'Google Drive sync disconnected'
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to disconnect'
+      throw err
+    }
+  }
+
+  /**
+   * Manually trigger sync (called when user clicks "Sync Now").
+   */
+  const triggerManualSync = async (
+    supabaseAccessToken: string
+  ): Promise<SyncResponse> => {
+    loading.value = true
+    error.value = ''
+    success.value = ''
+
+    try {
+      const response = await fetch(
+        `${apiBase}/google-drive/sync`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseAccessToken}`,
+            'Content-Type': 'application/json'
+          },
+          signal: getAbortController('triggerManualSync')
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to sync')
+      }
+
+      const data = await response.json()
+      success.value = `Synced ${data.files_processed} new files`
+      return {
+        status: data.status || 'success',
+        files_processed: data.files_processed,
+        files_failed: data.files_failed,
+        total_files: data.total_files,
+        failed_files: data.failed_files
+      }
+    } catch (err) {
+      // Silent abort
+      if (err instanceof Error && err.name === 'AbortError') {
+        return {
+          status: 'error',
+          files_processed: 0,
+          files_failed: 0,
+          total_files: 0,
+          failed_files: []
+        }
+      }
+      error.value = err instanceof Error ? err.message : 'Failed to sync'
+      throw err
+    } finally {
+      loading.value = false
     }
   }
 
@@ -498,6 +666,11 @@ export const useGoogleDrive = () => {
     fetchGoogleDriveFiles,
     saveGoogleToken,
     ingestGoogleDriveFile,
-    saveProviderTokensFromSession
+    saveProviderTokensFromSession,
+    connectGoogleDriveFolder,
+    getSyncConfig,
+    disconnectGoogleDrive,
+    triggerManualSync,
+    cleanup
   }
 }

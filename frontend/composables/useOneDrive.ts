@@ -12,6 +12,13 @@ interface OneDriveFile {
 
 export const useOneDrive = () => {
   // ========================================================================
+  // Configuration
+  // ========================================================================
+
+  const config = useRuntimeConfig()
+  const apiBase = config.public.apiBase || 'http://localhost:8000'
+
+  // ========================================================================
   // State
   // ========================================================================
 
@@ -44,7 +51,7 @@ export const useOneDrive = () => {
   ): Promise<void> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/save-microsoft-token',
+        `${apiBase}/save-microsoft-token`,
         {
           method: 'POST',
           headers: {
@@ -93,8 +100,6 @@ export const useOneDrive = () => {
       // If we have provider tokens, check if they're for Azure (Microsoft)
       if (session && (session as any)?.provider_token) {
         const providerToken = (session as any).provider_token
-
-        console.log('[useOneDrive] Provider token preview:', providerToken.substring(0, 10) + '...')
 
         // Check token prefix: Microsoft tokens start with "EwB" or "eyJ"
         // Google tokens start with "ya29."
@@ -168,48 +173,6 @@ export const useOneDrive = () => {
     success.value = ''
 
     try {
-      let subscription: any
-
-      // Listen for auth state changes when linking
-      const { data } = supabaseClient.auth.onAuthStateChange(
-        async (event: string, session: any) => {
-          // When linking (not signing in), we get provider_token in the session
-          if (session?.provider_token) {
-            try {
-              const { data: { session: currentSession } } =
-                await supabaseClient.auth.getSession()
-
-              if (!currentSession?.access_token) {
-                throw new Error('No session access token')
-              }
-
-              // Calculate Microsoft token expiration time (typically 1 hour = 3600 seconds)
-              const microsoftTokenExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString()
-
-              // Save tokens to backend
-              await saveMicrosoftToken(
-                currentSession.access_token,
-                session.provider_token,
-                session.provider_refresh_token,
-                microsoftTokenExpiresAt
-              )
-
-              success.value = 'Microsoft account linked successfully!'
-              microsoftLinked.value = true
-
-              // Clean up listener
-              subscription?.unsubscribe()
-            } catch (err) {
-              error.value = 'Linked but failed to save token. Please try again.'
-              subscription?.unsubscribe()
-              throw err
-            }
-          }
-        }
-      )
-
-      subscription = data.subscription
-
       // Build query params
       const queryParams: any = {
         access_type: 'offline', // Always request refresh token
@@ -229,7 +192,6 @@ export const useOneDrive = () => {
 
       if (linkError) {
         error.value = linkError.message
-        subscription?.unsubscribe()
         throw linkError
       }
     } catch (err) {
@@ -282,7 +244,7 @@ export const useOneDrive = () => {
 
       // Delete tokens from backend
       const response = await fetch(
-        'http://localhost:8000/api/v1/unlink-microsoft',
+        `${apiBase}/unlink-microsoft`,
         {
           method: 'DELETE',
           headers: {
@@ -319,7 +281,7 @@ export const useOneDrive = () => {
   ): Promise<boolean> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/microsoft-linked',
+        `${apiBase}/microsoft-linked`,
         {
           headers: {
             'Authorization': `Bearer ${supabaseAccessToken}`,
@@ -348,7 +310,7 @@ export const useOneDrive = () => {
   ): Promise<boolean> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/microsoft-needs-consent',
+        `${apiBase}/microsoft-needs-consent`,
         {
           headers: {
             'Authorization': `Bearer ${supabaseAccessToken}`,
@@ -388,7 +350,7 @@ export const useOneDrive = () => {
       }
 
       const response = await fetch(
-        `http://localhost:8000/api/v1/onedrive-files?${params.toString()}`,
+        `${apiBase}/onedrive-files?${params.toString()}`,
         {
           method: 'GET',
           headers: {
@@ -447,7 +409,7 @@ export const useOneDrive = () => {
   ): Promise<any> => {
     try {
       const response = await fetch(
-        'http://localhost:8000/api/v1/ingest-onedrive-file',
+        `${apiBase}/api/v1/ingest-onedrive-file`,
         {
           method: 'POST',
           headers: {

@@ -65,3 +65,11 @@ def get_ragie_service() -> RagieService:
 def get_supabase_service(supabase: Client = Depends(get_supabase)) -> SupabaseService:
     """Get Supabase service wrapper with user context."""
     return SupabaseService(supabase)
+
+
+def get_google_drive_service(
+    supabase: Client = Depends(get_supabase_admin)
+):
+    """Get Google Drive service (uses admin client for write operations)."""
+    from services.google_drive_service import GoogleDriveService
+    return GoogleDriveService(supabase)

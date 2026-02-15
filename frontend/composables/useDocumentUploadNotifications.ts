@@ -158,10 +158,22 @@ export function useDocumentUploadNotifications() {
     }
   }
 
+  /**
+   * Poll status of synced documents (e.g., from Google Drive)
+   * Automatically fetches page_count and chunks as Ragie processes them
+   */
+  async function pollSyncedDocuments(documentIds: string[]): Promise<void> {
+    // Poll each synced document in background
+    documentIds.forEach(docId => {
+      pollAndNotify(docId, `Synced document ${docId}`, crypto.randomUUID(), 'document')
+    })
+  }
+
   return {
     uploadAndNotify,
     uploadMultipleAndNotify,
     uploadsInProgress: readonly(uploadsInProgress),
     onUploadComplete,
+    pollSyncedDocuments,
   }
 }

@@ -16,6 +16,7 @@ from routers import (
     storage_router,
     videos_router,
     ragie_webhooks_router,
+    google_drive_router,
 )
 
 # Configure logging
@@ -50,6 +51,7 @@ app.include_router(audit_router, prefix=settings.api_prefix)
 app.include_router(storage_router, prefix=settings.api_prefix)
 app.include_router(videos_router, prefix=settings.api_prefix)
 app.include_router(ragie_webhooks_router, prefix=settings.api_prefix)
+app.include_router(google_drive_router, prefix=settings.api_prefix)
 
 
 @app.on_event("startup")

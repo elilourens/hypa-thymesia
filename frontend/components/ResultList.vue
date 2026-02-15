@@ -561,13 +561,12 @@ watch(
 <template>
   <div
     v-if="results?.length"
-    class="grid gap-4"
-    style="grid-template-columns: repeat(auto-fit, minmax(550px, 1fr))"
+    class="results"
   >
     <UCard
       v-for="r in results"
       :key="r.id"
-      class="flex flex-col"
+      class="result-card"
     >
       <template #header>
         <div class="flex items-center justify-between w-full">
@@ -866,3 +865,92 @@ watch(
     </template>
   </UModal>
 </template>
+
+<style scoped>
+/* Responsive grid layout */
+.results {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 550px), 1fr));
+}
+
+/* Smaller screens: reduce minimum card width and scale content */
+@media (max-width: 1200px) {
+  .results {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 450px), 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .results {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .results {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+}
+
+/* Scale card content on smaller screens */
+.result-card {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Responsive font sizing */
+@media (max-width: 900px) {
+  .result-card :deep(h3) {
+    font-size: 0.9rem;
+  }
+
+  .result-card :deep(.prose) {
+    font-size: 0.7rem;
+  }
+
+  .result-card :deep(p) {
+    font-size: 0.8rem;
+  }
+
+  .result-card :deep(iframe) {
+    height: 300px;
+  }
+}
+
+@media (max-width: 640px) {
+  .result-card :deep(h3) {
+    font-size: 0.85rem;
+  }
+
+  .result-card :deep(.prose) {
+    font-size: 0.65rem;
+  }
+
+  .result-card :deep(p) {
+    font-size: 0.75rem;
+  }
+
+  .result-card :deep(iframe) {
+    height: 250px;
+  }
+
+  .result-card :deep(img) {
+    max-height: 250px;
+  }
+}
+
+/* Ensure images scale properly */
+.result-card :deep(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Ensure iframes are responsive */
+.result-card :deep(iframe) {
+  width: 100%;
+  max-width: 100%;
+}
+</style>

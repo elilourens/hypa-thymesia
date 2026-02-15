@@ -7,6 +7,12 @@ export default defineNuxtConfig({
     head: {
       link: [
         { rel: 'icon', type: 'image/png', href: '/icon.png' }
+      ],
+      script: [
+        {
+          src: 'https://apis.google.com/js/api.js',
+          defer: true
+        }
       ]
     }
   },
