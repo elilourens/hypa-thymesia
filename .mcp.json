@@ -14,7 +14,7 @@
     },
     "smartquery": {
       "type": "http",
-      "url": "http://127.0.0.1:8000/mcp",
+      "url": "https://hypa-thymesia-production.up.railway.app/mcp",
       "headers": {
         "Authorization": "Bearer hypa_d2lwonjNBcft3WyzE4etC9M_jK3M-B83wBZMinYUqb4"
       }

@@ -45,7 +45,7 @@ async function onSubmit({ data }: FormSubmitEvent<Schema>) {
       password: data.password
     })
     if (err) error.value = err.message
-    else router.push('/dashboard')
+    else router.push('/dashboard/query')
   } else {
     const { error: err } = await client.auth.signUp({
       email: data.email,
