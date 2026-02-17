@@ -3,6 +3,7 @@
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_mcp import FastApiMCP
 
 from core.config import settings
 from routers import (
@@ -17,6 +18,7 @@ from routers import (
     videos_router,
     ragie_webhooks_router,
     google_drive_router,
+    api_keys_router,
 )
 
 # Configure logging
@@ -52,6 +54,21 @@ app.include_router(storage_router, prefix=settings.api_prefix)
 app.include_router(videos_router, prefix=settings.api_prefix)
 app.include_router(ragie_webhooks_router, prefix=settings.api_prefix)
 app.include_router(google_drive_router, prefix=settings.api_prefix)
+app.include_router(api_keys_router, prefix=settings.api_prefix)
+
+# Initialize and mount MCP server (only expose read-only document/search endpoints)
+mcp = FastApiMCP(
+    app,
+    name="SmartQuery",
+    description="Access your documents, search, and storage via MCP.",
+    include_operations=[
+        "list_documents_api_v1_documents_list_get",
+        "get_document_api_v1_documents__doc_id__get",
+        "retrieve_api_v1_search_retrieve_post",
+        "list_groups_api_v1_groups_get",
+    ],
+)
+mcp.mount_http()
 
 
 @app.on_event("startup")
@@ -87,6 +104,8 @@ async def startup_event():
 async def shutdown_event():
     """Called on application shutdown."""
     logger.info(" Ragie Backend API shutting down...")
+
+
 
 
 if __name__ == "__main__":

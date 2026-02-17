@@ -11,6 +11,7 @@ from .storage import router as storage_router
 from .videos import router as videos_router
 from .ragie_webhooks import router as ragie_webhooks_router
 from .google_drive import router as google_drive_router
+from .api_keys import router as api_keys_router
 
 __all__ = [
     "health_router",
@@ -24,4 +25,5 @@ __all__ = [
     "videos_router",
     "ragie_webhooks_router",
     "google_drive_router",
+    "api_keys_router",
 ]

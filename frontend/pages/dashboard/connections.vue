@@ -263,7 +263,7 @@ const handleSyncNow = useDebounceFn(async () => {
           <div>
             <h2 class="font-semibold text-lg">Google Drive</h2>
             <p class="text-sm text-foreground/70">
-              Automatically sync files from a Google Drive folder
+              Manually sync files from a Google Drive folder (Automatic coming soon)
             </p>
           </div>
 
