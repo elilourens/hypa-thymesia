@@ -2,12 +2,15 @@
 
 import logging
 import asyncio
+import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks, Request
+from fastapi.responses import StreamingResponse
 from supabase import Client
 
 from core import get_current_user, AuthUser
 from core.deps import get_supabase, get_supabase_admin, get_ragie_service
+from core.sse import get_sse_manager, SSEManager
 from core.user_limits import check_user_can_upload, add_to_user_monthly_throughput, add_to_user_monthly_file_count
 from services.video_service import VideoService
 from services.ragie_service import RagieService
@@ -346,3 +349,69 @@ async def delete_video(
             raise HTTPException(status_code=404, detail="Video not found")
         logger.error(f"Error deleting video: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete video")
+
+
+@router.get("/{video_id}/updates")
+async def video_status_stream(
+    video_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+    sse_manager: SSEManager = Depends(get_sse_manager)
+):
+    """Stream video processing status updates via Server-Sent Events (SSE).
+
+    This endpoint allows the frontend to receive real-time updates when
+    the video processing status changes, eliminating the need for polling.
+    """
+    # Verify user owns the video
+    try:
+        response = supabase.table("ragie_documents").select("id").eq("id", video_id).eq(
+            "user_id", current_user.id
+        ).single().execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error verifying video ownership: {e}")
+        raise HTTPException(status_code=500, detail="Failed to verify video")
+
+    # Generate unique client ID
+    client_id = str(uuid.uuid4())
+    client = sse_manager.add_client(video_id, client_id)
+
+    async def event_generator():
+        """Generate SSE events for status updates."""
+        try:
+            # Send initial connection message
+            yield f"data: {{'event': 'connected', 'video_id': '{video_id}'}}\n\n"
+
+            # Stream messages from the queue
+            while client.connected:
+                try:
+                    # Wait for a message with 30 second timeout
+                    # (clients need to receive something periodically to detect disconnection)
+                    data = await asyncio.wait_for(client.queue.get(), timeout=30.0)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    # Send a heartbeat to keep connection alive
+                    yield f": heartbeat\n\n"
+                except asyncio.CancelledError:
+                    break
+
+        finally:
+            await client.disconnect()
+            sse_manager.remove_client(video_id, client_id)
+            logger.info(f"SSE stream ended for video {video_id}")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive"
+        }
+    )

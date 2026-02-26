@@ -132,7 +132,77 @@ export function useVideos() {
   }
 
   /**
+   * Watch video processing status via Server-Sent Events (SSE)
+   * Real-time updates without polling
+   */
+  async function watchVideoStatus(
+    videoId: string,
+    onUpdate?: (status: VideoStatusResponse) => void,
+    onError?: (error: string) => void,
+    timeout?: number
+  ): Promise<() => void> {
+    const t = await token()
+    const eventSource = new EventSource(
+      `${API_BASE}/videos/${videoId}/updates`,
+      { headers: { Authorization: `Bearer ${t}` } }
+    )
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let closed = false
+
+    const cleanup = () => {
+      if (!closed) {
+        closed = true
+        eventSource.close()
+        if (timeoutId) clearTimeout(timeoutId)
+      }
+    }
+
+    // Handle incoming SSE messages
+    eventSource.addEventListener('message', async (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.event === 'connected') {
+          // Connection established, now fetch initial status
+          const status = await getVideoStatus(videoId)
+          if (onUpdate) onUpdate(status)
+
+          // Set timeout if specified
+          if (timeout) {
+            timeoutId = setTimeout(() => {
+              if (onError) onError('Video processing timeout')
+              cleanup()
+            }, timeout)
+          }
+        } else if (data.event === 'status_update') {
+          // Status update from webhook
+          const status = await getVideoStatus(videoId)
+          if (onUpdate) onUpdate(status)
+
+          // Stop watching if processing is complete or failed
+          if (status.processing_status === 'completed' || status.processing_status === 'ready' || status.processing_status === 'failed') {
+            cleanup()
+          }
+        }
+      } catch (err: any) {
+        console.error('Error parsing SSE message:', err)
+      }
+    })
+
+    // Handle connection errors
+    eventSource.onerror = () => {
+      if (onError) onError('Connection lost')
+      cleanup()
+    }
+
+    // Return cleanup function
+    return cleanup
+  }
+
+  /**
    * Poll video processing status until completed or failed
+   * Legacy fallback - use watchVideoStatus for real-time updates
    */
   async function pollVideoStatus(
     videoId: string,
@@ -177,6 +247,7 @@ export function useVideos() {
     listVideos,
     getVideo,
     getVideoStatus,
+    watchVideoStatus,
     pollVideoStatus,
     deleteVideo,
   }

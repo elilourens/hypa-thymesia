@@ -4,6 +4,7 @@ import logging
 import hmac
 import hashlib
 import time
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from supabase import Client
@@ -12,6 +13,7 @@ from collections import defaultdict
 
 from core.config import settings
 from core.deps import get_supabase_for_webhook, get_ragie_service
+from core.sse import get_sse_manager, SSEManager
 from services.ragie_service import RagieService
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,7 @@ async def ragie_webhook(
     x_signature: str = Header(None, alias="x-signature"),
     supabase: Client = Depends(get_supabase_for_webhook),
     ragie_service: RagieService = Depends(get_ragie_service),
+    sse_manager: SSEManager = Depends(get_sse_manager),
 ):
     """
     Handle Ragie webhook events for document processing status updates.
@@ -261,6 +264,20 @@ async def ragie_webhook(
                 ).execute()
 
                 logger.info(f"Updated document {doc_local_id} status to {status}")
+
+                # Broadcast status update via SSE to all connected clients
+                try:
+                    sse_update = {
+                        "event": "status_update",
+                        "video_id": doc_local_id,
+                        "status": status,
+                        "chunk_count": update_data.get("chunk_count"),
+                        "timestamp": update_data.get("updated_at")
+                    }
+                    # Run SSE broadcast without awaiting (fire-and-forget)
+                    asyncio.create_task(sse_manager.broadcast(doc_local_id, sse_update))
+                except Exception as e:
+                    logger.error(f"Error broadcasting SSE update for {doc_local_id}: {e}")
             else:
                 logger.warning(f"Document {document_id} not found in database")
 
