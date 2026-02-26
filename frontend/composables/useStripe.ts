@@ -129,6 +129,43 @@ export const useStripe = () => {
   }
 
   /**
+   * Downgrade the user's subscription to a lower tier or free
+   */
+  const downgradeSubscription = async (
+    supabaseAccessToken: string,
+    targetTier: 'pro' | 'free'
+  ): Promise<void> => {
+    try {
+      loading.value = true
+      error.value = null
+
+      const response = await fetch(`${API_BASE}/stripe/downgrade-subscription`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          target_tier: targetTier
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to downgrade subscription')
+      }
+
+      // Refresh subscription status
+      await getSubscriptionStatus(supabaseAccessToken)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to downgrade subscription'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
    * Get tier information including pricing and limits
    */
   const getTierInfo = (tier: 'free' | 'pro' | 'max'): TierInfo => {
@@ -165,6 +202,7 @@ export const useStripe = () => {
     getSubscriptionStatus,
     createCheckoutSession,
     cancelSubscription,
+    downgradeSubscription,
     getTierInfo
   }
 }

@@ -4,10 +4,14 @@ import { useStripe } from '~/composables/useStripe'
 
 const user = useSupabaseUser()
 const client = useSupabaseClient()
-const { getSubscriptionStatus, getTierInfo, loading, error } = useStripe()
+const { getSubscriptionStatus, getTierInfo, cancelSubscription, downgradeSubscription, loading, error } = useStripe()
 
 const subscriptionStatus = ref<any>(null)
 const currentTierInfo = ref<any>(null)
+const showCancelModal = ref(false)
+const showDowngradeModal = ref(false)
+const isCancelling = ref(false)
+const isDowngrading = ref(false)
 
 // Redirect if not logged in
 onMounted(async () => {
@@ -51,6 +55,57 @@ const getStatusBadgeLabel = (tier: string) => {
   if (tier === 'max') return 'Max Tier'
   if (tier === 'pro') return 'Pro Tier'
   return 'Free Tier'
+}
+
+const confirmCancel = async () => {
+  try {
+    isCancelling.value = true
+    const session = await client.auth.getSession()
+    const token = session?.data?.session?.access_token
+
+    if (!token) {
+      error.value = 'Not authenticated. Please log in first.'
+      return
+    }
+
+    await cancelSubscription(token)
+    showCancelModal.value = false
+
+    // Refresh status
+    const status = await getSubscriptionStatus(token)
+    subscriptionStatus.value = status
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to cancel subscription'
+  } finally {
+    isCancelling.value = false
+  }
+}
+
+const confirmDowngrade = async () => {
+  try {
+    isDowngrading.value = true
+    const session = await client.auth.getSession()
+    const token = session?.data?.session?.access_token
+
+    if (!token) {
+      error.value = 'Not authenticated. Please log in first.'
+      return
+    }
+
+    await downgradeSubscription(token, 'pro')
+    showDowngradeModal.value = false
+
+    // Refresh status
+    const status = await getSubscriptionStatus(token)
+    subscriptionStatus.value = status
+    if (status?.tier) {
+      currentTierInfo.value = getTierInfo(status.tier)
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to downgrade subscription'
+  } finally {
+    isDowngrading.value = false
+  }
 }
 </script>
 
@@ -185,6 +240,27 @@ const getStatusBadgeLabel = (tier: string) => {
             >
               {{ subscriptionStatus?.is_subscribed ? 'View All Plans' : 'Upgrade Now' }}
             </UButton>
+
+            <!-- Downgrade button (only for Max tier) -->
+            <UButton
+              v-if="subscriptionStatus?.is_subscribed && subscriptionStatus?.tier === 'max' && !subscriptionStatus?.cancel_at_period_end"
+              @click="showDowngradeModal = true"
+              icon="i-heroicons-arrow-down-right-20-solid"
+              variant="soft"
+            >
+              Downgrade to Pro
+            </UButton>
+
+            <!-- Cancel button (only if subscribed and not already cancelling) -->
+            <UButton
+              v-if="subscriptionStatus?.is_subscribed && !subscriptionStatus?.cancel_at_period_end"
+              @click="showCancelModal = true"
+              icon="i-heroicons-x-mark-20-solid"
+              color="red"
+              variant="soft"
+            >
+              Cancel Subscription
+            </UButton>
           </div>
         </template>
       </UCard>
@@ -255,6 +331,77 @@ const getStatusBadgeLabel = (tier: string) => {
           variant="soft"
         />
       </div>
+
+      <!-- Cancel Subscription Modal -->
+      <UModal v-model:open="showCancelModal" title="Cancel Subscription">
+        <template #body>
+          <div class="space-y-4">
+            <p class="text-zinc-300">
+              Your subscription will be cancelled at the end of your current billing period. You'll retain access to all features until the end of the period.
+            </p>
+
+            <div class="bg-zinc-800/50 border border-zinc-700 rounded-lg p-4">
+              <p class="text-sm text-zinc-400">
+                <strong>After cancellation:</strong><br>
+                • You'll be downgraded to the free plan<br>
+                • Access to Pro/Max features will end<br>
+                • No refund will be issued<br>
+                • You can re-subscribe at any time
+              </p>
+            </div>
+
+            <p class="text-sm text-amber-500/70 border border-amber-500/20 bg-amber-500/5 rounded-lg p-3">
+              ⚠️ If you exceed the free plan's limits after cancellation, you won't be able to upload more files.
+            </p>
+          </div>
+        </template>
+
+        <template #footer>
+          <div class="flex gap-3 justify-end">
+            <UButton variant="ghost" @click="showCancelModal = false" :disabled="isCancelling">
+              Keep Subscription
+            </UButton>
+            <UButton color="red" @click="confirmCancel" :loading="isCancelling">
+              Confirm Cancellation
+            </UButton>
+          </div>
+        </template>
+      </UModal>
+
+      <!-- Downgrade Modal -->
+      <UModal v-model:open="showDowngradeModal" title="Downgrade to Pro">
+        <template #body>
+          <div class="space-y-4">
+            <p class="text-zinc-300">
+              You're about to downgrade from Max to Pro. Your plan will change immediately and you'll receive a prorated credit for any unused time.
+            </p>
+
+            <div class="bg-zinc-800/50 border border-zinc-700 rounded-lg p-4">
+              <p class="text-sm text-zinc-400">
+                <strong>Pro Plan includes:</strong><br>
+                • 2,000 total pages (down from 10,000)<br>
+                • 500 monthly file uploads (down from 2,000)<br>
+                • 20 GB monthly bandwidth (down from 100 GB)
+              </p>
+            </div>
+
+            <p class="text-sm text-amber-500/70 border border-amber-500/20 bg-amber-500/5 rounded-lg p-3">
+              ⚠️ If you exceed the Pro plan's limits, you won't be able to upload more files until you delete some documents.
+            </p>
+          </div>
+        </template>
+
+        <template #footer>
+          <div class="flex gap-3 justify-end">
+            <UButton variant="ghost" @click="showDowngradeModal = false" :disabled="isDowngrading">
+              Cancel
+            </UButton>
+            <UButton color="amber" @click="confirmDowngrade" :loading="isDowngrading">
+              Confirm Downgrade
+            </UButton>
+          </div>
+        </template>
+      </UModal>
     </div>
   </div>
 </template>

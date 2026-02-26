@@ -17,6 +17,7 @@ from core.user_limits import (
     PRO_MAX_MONTHLY_FILES,
     MAX_MAX_MONTHLY_FILES,
     DEFAULT_MAX_MONTHLY_FILES,
+    PRO_MAX_MONTHLY_THROUGHPUT,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,12 @@ class SubscriptionStatusResponse(BaseModel):
     current_period_end: Optional[int] = None
     cancel_at_period_end: Optional[bool] = None
     tier: Optional[str] = None
+
+
+class DowngradeSubscriptionRequest(BaseModel):
+    """Request to downgrade subscription to a lower tier or free."""
+
+    target_tier: str  # "pro" or "free"
 
 
 def get_tier_from_price_id(price_id: str) -> str:
@@ -235,6 +242,132 @@ async def cancel_subscription(
         raise HTTPException(
             status_code=500,
             detail="Failed to cancel subscription"
+        )
+
+
+@router.post("/downgrade-subscription")
+async def downgrade_subscription(
+    request: DowngradeSubscriptionRequest,
+    auth: AuthUser = Depends(get_current_user),
+    supabase=Depends(get_supabase),
+):
+    """Downgrade subscription to a lower tier or cancel (immediate)."""
+    if not stripe.api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Stripe is not configured"
+        )
+
+    # Validate target tier
+    if request.target_tier not in ["pro", "free"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid target tier. Must be 'pro' or 'free'."
+        )
+
+    try:
+        # Get current subscription
+        response = supabase.table("user_settings").select(
+            "stripe_subscription_id, subscription_tier"
+        ).eq("user_id", auth.id).execute()
+
+        if not response.data or not response.data[0].get("stripe_subscription_id"):
+            raise HTTPException(
+                status_code=404,
+                detail="No active subscription found"
+            )
+
+        settings = response.data[0]
+        subscription_id = settings["stripe_subscription_id"]
+        current_tier = settings.get("subscription_tier", "free")
+
+        # Validate downgrade (target tier must be lower than current)
+        tier_hierarchy = {"free": 0, "pro": 1, "max": 2}
+        if tier_hierarchy.get(request.target_tier, 0) >= tier_hierarchy.get(current_tier, 0):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot downgrade from {current_tier} to {request.target_tier}. Target tier must be lower."
+            )
+
+        # Retrieve the subscription to get items
+        subscription = stripe.Subscription.retrieve(subscription_id)
+
+        if request.target_tier == "free":
+            # Immediately cancel the subscription
+            stripe.Subscription.delete(subscription_id)
+
+            # Update database to free tier
+            from core.user_limits import DEFAULT_MAX_MONTHLY_THROUGHPUT
+            supabase.table("user_settings").update({
+                "stripe_subscription_status": "canceled",
+                "stripe_cancel_at_period_end": False,
+                "subscription_tier": "free",
+                "max_files": DEFAULT_MAX_FILES,
+                "max_monthly_files": DEFAULT_MAX_MONTHLY_FILES,
+                "max_monthly_throughput_bytes": DEFAULT_MAX_MONTHLY_THROUGHPUT,
+            }).eq("user_id", auth.id).execute()
+
+            logger.info(f"Downgraded user {auth.id} to free tier (cancelled subscription)")
+
+            return {
+                "success": True,
+                "message": "Subscription has been cancelled immediately. You have been downgraded to the free plan.",
+                "tier": "free"
+            }
+
+        else:  # target_tier == "pro"
+            # Modify the subscription to change price
+            target_price_id = PRO_PRICE_ID
+
+            # Get the first subscription item
+            items = subscription.get("items", {}).get("data", [])
+            if not items:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Subscription has no items to modify"
+                )
+
+            item_id = items[0].get("id")
+
+            # Modify the subscription with proration
+            stripe.Subscription.modify(
+                subscription_id,
+                items=[{
+                    "id": item_id,
+                    "price": target_price_id,
+                }],
+                proration_behavior="create_prorations"
+            )
+
+            # Update database to pro tier
+            supabase.table("user_settings").update({
+                "subscription_tier": "pro",
+                "max_files": PRO_MAX_FILES,
+                "max_monthly_files": PRO_MAX_MONTHLY_FILES,
+                "max_monthly_throughput_bytes": PRO_MAX_MONTHLY_THROUGHPUT,
+            }).eq("user_id", auth.id).execute()
+
+            logger.info(f"Downgraded user {auth.id} from {current_tier} to pro tier")
+
+            return {
+                "success": True,
+                "message": "Subscription has been downgraded to Pro. You'll receive a prorated credit for the difference.",
+                "tier": "pro"
+            }
+
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error downgrading subscription: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Payment system error: {str(e)}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downgrading subscription: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to downgrade subscription"
         )
 
 
