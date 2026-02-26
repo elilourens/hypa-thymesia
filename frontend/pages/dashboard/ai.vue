@@ -54,45 +54,7 @@ function reload() {
 
 <template>
   <BodyCard>
-    <UChatPalette class="h-[500px]">
-      <!-- Messages -->
-      <UChatMessages
-        :messages="messages"
-        :status="status"
-        :user="{ side: 'right', avatar: { icon: 'i-lucide-user' } }"
-        :assistant="{ side: 'left', avatar: { icon: 'i-lucide-bot' } }"
-        should-auto-scroll
-      >
-        <!-- Custom message bubble styling -->
-        <template #content="{ message }">
-          <div
-            class="rounded-lg p-3  whitespace-pre-wrap"
-            :class="message.role === 'user'
-              ? 'bg-purple-400 text-gray-950 ml-auto '
-              : 'bg-gray-950 text-white mr-auto max-w-[80%]'"
-          >
-            {{ getTextFromMessage(message) }}
-          </div>
-        </template>
-      </UChatMessages>
-
-      <!-- Prompt fixed at bottom -->
-      <template #prompt>
-        <UChatPrompt
-          v-model="input"
-          placeholder="Ask the AI something..."
-          :error="error"
-          @submit="handleSubmit"
-        >
-          <UChatPromptSubmit
-            :status="status"
-            @stop=""
-            @reload="reload"
-            class="mr-4"
-          />
-        </UChatPrompt>
-      </template>
-    </UChatPalette>
+    <p>Coming soon</p>
   </BodyCard>
 </template>
 

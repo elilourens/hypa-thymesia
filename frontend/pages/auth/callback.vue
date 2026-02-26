@@ -10,7 +10,7 @@ onMounted(async () => {
 
   // If user is authenticated, redirect to dashboard
   if (user.value) {
-    await router.push('/dashboard')
+    await router.push('/dashboard/query')
   } else {
     // If still not authenticated, redirect back to login with error
     await router.push('/login?error=Authentication failed')

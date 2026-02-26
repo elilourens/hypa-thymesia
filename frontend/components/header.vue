@@ -42,17 +42,17 @@ const dropdownItems = computed<DropdownMenuItem[][]>(() => [
       <div class="flex gap-4 items-center">
         <!-- Logged out: Navigation buttons -->
         <template v-if="!user">
-          <UButton size="md" color="neutral" variant="ghost" class="hover:text-primary transition-colors">Contact us</UButton>
-          <UButton size="md" color="neutral" variant="ghost" class="hover:text-primary transition-colors">Use Cases</UButton>
-          <UButton size="md" color="neutral" variant="ghost" class="hover:text-primary transition-colors">Demo</UButton>
-          <UButton to="/pricing" size="md" color="neutral" variant="ghost" class="hover:text-primary transition-colors">Pricing</UButton>
+          <UButton size="md" color="neutral" variant="ghost" class="hidden md:inline-flex hover:text-primary transition-colors">Contact us</UButton>
+          <UButton size="md" color="neutral" variant="ghost" class="hidden md:inline-flex hover:text-primary transition-colors">Use Cases</UButton>
+          <UButton size="md" color="neutral" variant="ghost" class="hidden lg:inline-flex hover:text-primary transition-colors">Demo</UButton>
+          <UButton to="/pricing" size="md" color="neutral" variant="ghost" class="hidden sm:inline-flex hover:text-primary transition-colors">Pricing</UButton>
           <UButton to="/login" icon="i-lucide-rocket" size="md" color="primary" variant="solid" class="hover:shadow-lg transition-all">Sign Up</UButton>
         </template>
 
         <!-- Logged in: Profile dropdown -->
         <template v-else>
-          <UButton to="/dashboard" icon="i-lucide-home" size="md" color="neutral" variant="ghost" class="hover:text-primary transition-colors">Dashboard</UButton>
-          <UButton to="/pricing" size="md" color="neutral" variant="ghost" class="hover:text-primary transition-colors">Pricing</UButton>
+          <UButton to="/dashboard/query" icon="i-lucide-home" size="md" color="neutral" variant="ghost" class="hover:text-primary transition-colors">Dashboard</UButton>
+          <UButton to="/pricing" size="md" color="neutral" variant="ghost" class="hidden md:inline-flex hover:text-primary transition-colors">Pricing</UButton>
 
           <UDropdownMenu :items="dropdownItems" :ui="{ content: 'w-48' }">
             <UButton icon="i-lucide-user" color="neutral" variant="ghost" size="md" trailing-icon="i-lucide-chevron-down" />

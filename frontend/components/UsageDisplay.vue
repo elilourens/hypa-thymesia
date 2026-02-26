@@ -88,7 +88,7 @@ async function refreshQuota() {
               You've already uploaded <strong>{{ displayQuotaInfo!.monthly_file_count }} files</strong> this month. Please try again next month or upgrade to premium.
             </div>
             <div class="flex gap-2">
-              <UButton to="/dashboard" size="sm" color="error" variant="solid">
+              <UButton to="/dashboard/query" size="sm" color="error" variant="solid">
                 Manage Files
               </UButton>
             </div>
