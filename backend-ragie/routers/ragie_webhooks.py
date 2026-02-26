@@ -283,6 +283,23 @@ async def ragie_webhook(
 
             return {"status": "success"}
 
+        # Handle document deletion
+        elif event_type == "document_deleted":
+            document_id = payload.get("document_id")
+            if document_id:
+                logger.info(f"Document {document_id} was deleted in Ragie")
+                # Broadcast deletion event via SSE to all connected clients
+                try:
+                    sse_update = {
+                        "event": "document_deleted",
+                        "document_id": document_id,
+                        "timestamp": __import__("datetime").datetime.utcnow().isoformat()
+                    }
+                    asyncio.create_task(sse_manager.broadcast(document_id, sse_update))
+                except Exception as e:
+                    logger.error(f"Error broadcasting SSE delete event for {document_id}: {e}")
+            return {"status": "success"}
+
         # Handle other event types
         elif event_type == "connection_sync_finished":
             logger.info("Connection sync finished")

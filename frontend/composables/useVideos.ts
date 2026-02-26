@@ -139,7 +139,8 @@ export function useVideos() {
     videoId: string,
     onUpdate?: (status: VideoStatusResponse) => void,
     onError?: (error: string) => void,
-    timeout?: number
+    timeout?: number,
+    onDelete?: (documentId: string) => void
   ): Promise<() => void> {
     const t = await token()
     const eventSource = new EventSource(
@@ -184,6 +185,10 @@ export function useVideos() {
           if (status.processing_status === 'completed' || status.processing_status === 'ready' || status.processing_status === 'failed') {
             cleanup()
           }
+        } else if (data.event === 'document_deleted') {
+          // Document was deleted
+          if (onDelete) onDelete(data.document_id)
+          cleanup()
         }
       } catch (err: any) {
         console.error('Error parsing SSE message:', err)

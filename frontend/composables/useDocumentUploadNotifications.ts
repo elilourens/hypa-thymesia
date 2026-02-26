@@ -25,7 +25,7 @@ const uploadCompleteCallbacks = new Set<UploadCompleteCallback>()
 export function useDocumentUploadNotifications() {
   const toast = useToast()
   const { uploadDocument, pollDocumentStatus } = useDocuments()
-  const { uploadVideo, pollVideoStatus } = useVideos()
+  const { uploadVideo, watchVideoStatus, pollVideoStatus } = useVideos()
 
   /**
    * Detect if file is a video based on extension
@@ -82,41 +82,93 @@ export function useDocumentUploadNotifications() {
   }
 
   /**
-   * Poll file status and show notification when ready/failed
+   * Watch file status and show notification when ready/failed
+   * Uses SSE for videos (real-time) and polling for documents (legacy)
    */
   async function pollAndNotify(fileId: string, filename: string, toastId: string, fileType: 'document' | 'video') {
     let success = false
+    let cleanup: (() => void) | null = null
 
     try {
-      const finalStatus = fileType === 'video'
-        ? await pollVideoStatus(fileId, undefined, 300, 2000)
-        : await pollDocumentStatus(fileId, undefined, 300, 2000)
+      if (fileType === 'video') {
+        // Use real-time SSE for videos
+        cleanup = await watchVideoStatus(
+          fileId,
+          (status) => {
+            const statusValue = status.processing_status
 
-      const statusField = fileType === 'video' ? 'processing_status' : 'status'
-      const finalStatusValue = (finalStatus as any)[statusField]
+            // Replace processing toast with final status
+            if (statusValue === 'ready' || statusValue === 'completed') {
+              toast.add({
+                id: toastId,
+                title: 'Processing complete',
+                description: `${filename} is ready to watch`,
+                color: 'success',
+                icon: 'i-lucide-check-circle',
+              })
+              success = true
+            } else if (statusValue === 'failed') {
+              toast.add({
+                id: toastId,
+                title: 'Processing failed',
+                description: `${filename} could not be processed`,
+                color: 'error',
+                icon: 'i-lucide-alert-circle',
+              })
+            }
+          },
+          (error) => {
+            console.error('SSE error:', error)
+            toast.add({
+              id: toastId,
+              title: 'Error',
+              description: `Failed to monitor ${filename}`,
+              color: 'error',
+              icon: 'i-lucide-alert-circle',
+            })
+          },
+          600000, // 10 minute timeout
+          (deletedDocId) => {
+            // Document was deleted from Ragie
+            toast.add({
+              id: toastId,
+              title: 'Deleted',
+              description: `${filename} was deleted`,
+              color: 'warning',
+              icon: 'i-lucide-trash2',
+            })
+          }
+        )
+      } else {
+        // Use polling for documents (legacy)
+        const finalStatus = await pollDocumentStatus(fileId, undefined, 300, 2000)
+        const finalStatusValue = (finalStatus as any).status
 
-      // Replace processing toast with final status
-      if (finalStatusValue === 'ready' || finalStatusValue === 'completed') {
-        toast.add({
-          id: toastId,
-          title: 'Processing complete',
-          description: `${filename} is ready${fileType === 'video' ? ' to watch' : ' to use'}`,
-          color: 'success',
-          icon: 'i-lucide-check-circle',
-        })
-        success = true
-      } else if (finalStatusValue === 'failed') {
-        toast.add({
-          id: toastId,
-          title: 'Processing failed',
-          description: `${filename} could not be processed`,
-          color: 'error',
-          icon: 'i-lucide-alert-circle',
-        })
+        // Replace processing toast with final status
+        if (finalStatusValue === 'ready' || finalStatusValue === 'completed') {
+          toast.add({
+            id: toastId,
+            title: 'Processing complete',
+            description: `${filename} is ready to use`,
+            color: 'success',
+            icon: 'i-lucide-check-circle',
+          })
+          success = true
+        } else if (finalStatusValue === 'failed') {
+          toast.add({
+            id: toastId,
+            title: 'Processing failed',
+            description: `${filename} could not be processed`,
+            color: 'error',
+            icon: 'i-lucide-alert-circle',
+          })
+        }
       }
 
       uploadsInProgress.value.delete(fileId)
     } catch (err: any) {
+      if (cleanup) cleanup()
+
       toast.add({
         id: toastId,
         title: 'Error',
@@ -169,11 +221,26 @@ export function useDocumentUploadNotifications() {
     })
   }
 
+  /**
+   * Show notification for deleted file
+   * Call this when a file/video is deleted
+   */
+  function notifyDelete(filename: string, fileType: 'document' | 'video' = 'document') {
+    toast.add({
+      title: 'Deleted',
+      description: `${filename} has been deleted`,
+      color: 'warning',
+      icon: 'i-lucide-trash2',
+      timeout: 3000,
+    })
+  }
+
   return {
     uploadAndNotify,
     uploadMultipleAndNotify,
     uploadsInProgress: readonly(uploadsInProgress),
     onUploadComplete,
     pollSyncedDocuments,
+    notifyDelete,
   }
 }
