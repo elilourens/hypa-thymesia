@@ -142,6 +142,15 @@ async function doUpload(): Promise<void> {
           class="w-96 min-h-48"
           accept=".pdf,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.mp4"
         />
+
+        <!-- Video size limit notice -->
+        <UAlert
+          icon="i-heroicons-information-circle-20-solid"
+          color="blue"
+          variant="subtle"
+          title="Video file size limit"
+          description="Videos are currently limited to 50 MB per file."
+        />
       </div>
 
       <!-- Divider -->
