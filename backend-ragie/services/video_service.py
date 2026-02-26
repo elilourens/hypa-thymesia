@@ -273,7 +273,7 @@ class VideoService:
 
             # Calculate page_count from file size (100MB = 5 pages)
             file_size_mb = doc["file_size_bytes"] / (1024 * 1024)
-            page_count = max(1, round(file_size_mb / 20 * 5, 1))
+            page_count = max(1, round(file_size_mb / 20 * 5))
             self.supabase.table("ragie_documents").update({
                 "page_count": page_count
             }).eq("id", video_id).execute()
